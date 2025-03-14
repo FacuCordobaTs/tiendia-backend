@@ -1,0 +1,33 @@
+{
+  "name": "backend",
+  "scripts": {
+    "dev": "bun run src/index.ts --listen",
+    "db:generate": "drizzle-kit generate --dialect mysql",
+    "db:up": "drizzle-kit up:mysql --config=drizzle.config.ts"
+  },
+  "dependencies": {
+    "@hono/zod-validator": "^0.4.2",
+    "@libsql/client": "^0.14.0",
+    "axios": "^1.7.9",
+    "base64-arraybuffer": "^1.0.2",
+    "bcryptjs": "^2.4.3",
+    "drizzle-kit": "^0.30.4",
+    "drizzle-orm": "^0.39.1",
+    "drizzle-zod": "^0.7.0",
+    "fcm-cloudflare-workers": "^2.0.0",
+    "google-auth-library": "^9.15.1",
+    "hono": "^4.6.19",
+    "jsonwebtoken": "^9.0.2",
+    "mercadopago": "^2.3.0",
+    "mysql2": "^3.13.0",
+    "uuid-js": "^0.7.5",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250129.0",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/jsonwebtoken": "^9.0.8",
+    "@types/uuid-js": "^0.7.6",
+    "wrangler": "^3.107.0"
+  }
+}
