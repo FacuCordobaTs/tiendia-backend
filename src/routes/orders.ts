@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { drizzle } from 'drizzle-orm/mysql2'; // Cambiamos a mysql2
 import { pool } from '../db'; // Importamos el pool de MySQL
-import { orders, orderItems, users } from "../db/schema";
+import { orders, orderItems, users, products } from "../db/schema";
 import { authMiddleware } from "../middlewares/auth.middleware";
 import { desc, eq } from "drizzle-orm";
 import { EnhancedFcmMessage, FCM, FcmOptions } from "fcm-cloudflare-workers";
@@ -45,12 +45,27 @@ ordersRoute.post('/create', zValidator("json", createOrderSchema), async (c) => 
 
     // Insertar los items de la orden
     for (const item of order) {
+      const [product] = await db.select()
+      .from(products)
+      .where(eq(products.id, item.id));
+
       await db.insert(orderItems).values({
         productId: item.id,
         comment: item.comment,
         orderId: newOrder.id,
         size: item.size
       });
+
+      if (item.size && product.sizes) {
+        const sizes = typeof product.sizes === "string" ? JSON.parse(product.sizes) : [];
+        const sizeIndex = sizes.findIndex((size: any) => size.size === item.size);
+        sizes[sizeIndex].stock -= 1;
+
+        await db.update(products).set({ sizes: JSON.stringify(sizes) }).where(eq(products.id, item.id));
+      }
+      else if (product.stock) {
+        await db.update(products).set({ stock: product.stock - 1 }).where(eq(products.id, item.id));
+      }
     }
 
     // Obtener el token FCM del usuario
