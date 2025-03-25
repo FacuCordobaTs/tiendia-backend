@@ -123,7 +123,8 @@ export const authRoute = new Hono()
       setCookie(c, 'token', token as string, {
         path: '/',
         sameSite: 'None',
-        secure: true
+        secure: true,
+        maxAge: 7 * 24 * 60 * 60,
       });
 
       return c.json({ message: 'Usuario registrado correctamente', newUser }, 200);
@@ -152,7 +153,8 @@ export const authRoute = new Hono()
       setCookie(c, 'token', token as string, {
         path: '/',
         sameSite: 'None',
-        secure: true
+        secure: true,
+        maxAge: 7 * 24 * 60 * 60,
       });
 
       return c.json({ message: 'Inicio de sesión realizado con éxito', user }, 200);

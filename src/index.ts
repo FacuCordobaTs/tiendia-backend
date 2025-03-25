@@ -8,6 +8,11 @@ import { authRoute } from './routes/auth';
 import { productsRoute } from './routes/products';
 import ordersRoute from './routes/orders';
 import paymentsRoute from './routes/payments';
+import { config } from 'dotenv';
+import path from 'path';
+
+// Carga el archivo .env desde una ruta absoluta
+config({ path: path.resolve('/home/appuser/app', '.env') });
 
 const app = new Hono();
 const allowedOrigins = [
@@ -25,18 +30,10 @@ if (!existsSync(UPLOAD_DIR)) {
 // Configuración CORS corregida
 app.use('*', cors({
   origin: (origin) => {
-    // Si no hay origin o es una cadena vacía, devolver un valor por defecto o rechazar
-    if (!origin) {
-      return allowedOrigins[0]; // O usa '' para rechazar CORS si prefieres
+    if (!origin || !allowedOrigins.includes(origin)) {
+      return allowedOrigins[0]; // O '' para rechazar si no hay coincidencia
     }
-    try {
-      return allowedOrigins.includes(new URL(origin).origin)
-        ? origin
-        : allowedOrigins[0]; // Valor por defecto si no coincide
-    } catch (e) {
-      // Manejar error de parseo de URL
-      return allowedOrigins[0]; // O '' para rechazar
-    }
+    return origin; // Devuelve el origen si está en la lista
   },
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization'],
@@ -63,6 +60,8 @@ app.use('/uploads/*', serveStatic({
     }
   },
 }));
+
+app.get('/', (c) => c.text('Hello, World!'));
 
 // Rutas
 app.basePath("/api")
