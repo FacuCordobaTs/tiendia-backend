@@ -25,5 +25,5 @@ jobs:
             cd app  # Ruta donde está la aplicación en la VPS
             git pull origin main  # Actualiza el código
             bun install           # Instala dependencias 
-            sudo systemctl restart mi-app.service   # Reinicia la aplicación 
+            sudo /bin/systemctl restart mi-app.service   # Reinicia la aplicación 
           EOF
