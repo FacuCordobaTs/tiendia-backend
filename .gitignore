@@ -12,9 +12,9 @@ dist/
 .idea/shelf
 
 # deps
-backend
 node_modules/
 .wrangler
+public
 
 # env
 .env
