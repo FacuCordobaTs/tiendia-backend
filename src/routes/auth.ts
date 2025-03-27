@@ -42,11 +42,22 @@ async function updateImage(oldUrl: string, newBase64: string): Promise<string> {
 }
 
 async function deleteImage(imageUrl: string): Promise<void> {
-  const fileName = imageUrl.split('/').pop();
-  if (!fileName) throw new Error('URL de imagen inválida');
-  
-  const filePath = join(UPLOAD_DIR, fileName);
-  await unlink(filePath);
+  try {
+    const fileName = imageUrl.split("/").pop();
+    if (!fileName) {
+      console.warn("URL de imagen inválida:", imageUrl);
+      return;
+    }
+
+    const filePath = join(UPLOAD_DIR, fileName);
+    await unlink(filePath);
+  } catch (error: any) {
+    if (error.code === "ENOENT") {
+      console.warn("Imagen no encontrada:", imageUrl);
+    } else {
+      console.error("Error al eliminar la imagen:", error);
+    }
+  }
 }
 
 // Esquemas de validación
