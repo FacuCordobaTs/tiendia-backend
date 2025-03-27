@@ -16,8 +16,8 @@ config({ path: path.resolve('/home/appuser/app', '.env') });
 
 const app = new Hono();
 const allowedOrigins = [
-  'https://ecommerce-admin-eyh.pages.dev',
-  'https://burg-ecom.pages.dev',
+  'https://admin.tiendia.app',
+  'https://tiendia.app',
   'http://localhost:5173' // Desarrollo local
 ];
 

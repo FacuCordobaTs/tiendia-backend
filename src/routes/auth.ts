@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+ import { Hono } from 'hono';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/mysql2';
 import { pool } from '../db';
@@ -243,7 +243,7 @@ export const authRoute = new Hono()
       const [updatedUser] = await db.update(users)
         .set(updateData)
         .where(eq(users.id, id))
-      console.log(updatedUser)
+        
       return c.json({ 
         message: 'Usuario actualizado correctamente',
         user: updatedUser
