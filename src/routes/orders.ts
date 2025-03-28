@@ -217,7 +217,7 @@ ordersRoute.put('/togglePaid/:id', authMiddleware, async (c) => {
   }
 });
 // Nueva ruta para obtener los detalles completos de la orden
-ordersRoute.get('/details/:id', authMiddleware, async (c) => {
+ordersRoute.get('/details/:id', async (c) => {
   const db = drizzle(pool);
   const id = Number(c.req.param('id'));
 
