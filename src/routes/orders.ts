@@ -216,5 +216,56 @@ ordersRoute.put('/togglePaid/:id', authMiddleware, async (c) => {
     return c.json({ message: 'Error al actualizar el estado de pago' }, 500);
   }
 });
+// Nueva ruta para obtener los detalles completos de la orden
+ordersRoute.get('/details/:id', authMiddleware, async (c) => {
+  const db = drizzle(pool);
+  const id = Number(c.req.param('id'));
+
+  try {
+    // Obtener la orden
+    const orderArr = await db.select().from(orders).where(eq(orders.id, id));
+    if (!orderArr.length) return c.json({ message: 'Orden no encontrada' }, 404);
+    const order = orderArr[0];
+    
+    // Obtener los items de la orden
+    const items = await db.select({
+      id: orderItems.id,
+      productId: orderItems.productId,
+      comment: orderItems.comment,
+      size: orderItems.size
+    })
+    .from(orderItems)
+    .where(eq(orderItems.orderId, id));
+    
+    // Obtener información de la tienda usando shopUsername
+    const shopArr = await db.select({
+      shopname: users.shopname,
+      address: users.address,
+      whatsappNumber: users.whatsappNumber,
+    })
+    .from(users)
+    .where(order.shopUsername ? eq(users.username, order.shopUsername) : undefined);
+    
+    const shop = shopArr.length ? shopArr[0] : null;
+    
+    return c.json({
+      order: {
+        id: order.id,
+        totalPrice: order.totalPrice,
+        phoneNumber: order.phoneNumber,
+        address: order.address,
+        createdAt: order.createdAt,
+        paymentMethod: order.paymentMethod,
+        deliveryType: order.deliveryType,
+        paid: order.paid,
+        items,
+        shop,
+      }
+    }, 200);
+  } catch (error: any) {
+    console.error('Error obteniendo detalles de la orden:', error);
+    return c.json({ message: 'Error al obtener detalles de la orden' }, 500);
+  }
+});
 
 export default ordersRoute;
