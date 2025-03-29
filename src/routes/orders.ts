@@ -6,8 +6,17 @@ import { pool } from '../db'; // Importamos el pool de MySQL
 import { orders, orderItems, users, products } from "../db/schema";
 import { authMiddleware } from "../middlewares/auth.middleware";
 import { desc, eq } from "drizzle-orm";
-import { EnhancedFcmMessage, FCM, FcmOptions } from "fcm-cloudflare-workers";
+import admin from 'firebase-admin';
 
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: process.env.FCM_PROJECT_ID || "",
+      privateKey: process.env.FCM_PRIVATE_KEY_ID || "",
+      clientEmail: process.env.FCM_CLIENT_EMAIL || "",
+    })
+  });
+}
 // Esquema de validación
 const createOrderSchema = z.object({
   order: z.array(z.object({
@@ -72,34 +81,30 @@ ordersRoute.post('/create', zValidator("json", createOrderSchema), async (c) => 
     const user = await db.select().from(users).where(eq(users.username, username));
 
     if (user[0].fcmToken) {
-      // Configurar FCM con la cuenta de servicio (la librería se encargará de generar y cachear el access token)
-      const fcmOptions = new FcmOptions({
-        serviceAccount:{
-          "type": process.env.FCM_TYPE || "",
-          "project_id": process.env.FCM_PROJECT_ID || "",
-          "private_key_id": process.env.FCM_PRIVATE_KEY_ID || "",
-          "private_key": process.env.FCM_PRIVATE_KEY || "",
-          "client_email": process.env.FCM_CLIENT_EMAIL || "",
-          "client_id": process.env.FCM_CLIENT_ID || "",
-          "auth_uri": process.env.FCM_AUTH_URI || "",
-          "token_uri": process.env.FCM_TOKEN_URI || "",
-          "auth_provider_x509_cert_url": process.env.FCM_AUTH_PROVIDER_X509_CERT_URL || "",
-          "client_x509_cert_url": process.env.FCM_CLIENT_X509_CERT_URL || "",
-        }        
-      });
-      const fcm = new FCM(fcmOptions);
+      const token = user[0].fcmToken;
 
-      const message: EnhancedFcmMessage = {
-        notification: {
-            title: "Nuevo pedido!",
-            body: `Tienes un nuevo pedido`,
-        },
+      // Validar que el token sea válido
+      if (typeof token !== 'string' || token.trim() === '' || /[^\w-:]/.test(token)) {
+        console.error('Token FCM inválido:', token);
+        return c.json({ message: 'Token FCM inválido o ausente' }, 400);
       }
-      
+
+      // Crear el mensaje de notificación
+      const message = {
+        notification: {
+          title: "¡Nuevo pedido!",
+          body: `Tienes un nuevo pedido de $${Number(price).toFixed(2)}`,
+        },
+        token: token,
+      };
+
+      // Enviar la notificación
       try {
-        await fcm.sendToToken(message, user[0].fcmToken);
+        await admin.messaging().send(message);
+        console.log('Notificación FCM enviada exitosamente');
       } catch (error: any) {
-        return c.json({ message: "Erorr fcm "+ error.message, user: user[0] }, 200);
+        console.error('Error enviando notificación FCM:', error.message);
+        return c.json({ message: `Error FCM: ${error.message}` }, 500);
       }
     }
 
