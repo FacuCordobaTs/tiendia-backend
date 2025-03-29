@@ -91,8 +91,8 @@ ordersRoute.post('/create', zValidator("json", createOrderSchema), async (c) => 
 
       const message: EnhancedFcmMessage = {
         notification: {
-            title: "Nuevo pedido! 😁",
-            body: `Tienes un nuevo pedido de $${price}`,
+            title: "Nuevo pedido!",
+            body: `Tienes un nuevo pedido`,
         },
       }
       
