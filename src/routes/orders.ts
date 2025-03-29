@@ -8,6 +8,11 @@ import { authMiddleware } from "../middlewares/auth.middleware";
 import { desc, eq } from "drizzle-orm";
 import { EnhancedFcmMessage, FCM, FcmOptions } from "fcm-cloudflare-workers";
 
+interface Size {
+  size: string;
+  stock: number;
+}
+
 // Esquema de validación
 const createOrderSchema = z.object({
   order: z.array(z.object({
@@ -57,9 +62,9 @@ ordersRoute.post('/create', zValidator("json", createOrderSchema), async (c) => 
       });
 
       if (item.size && product.sizes) {
-        const sizes = typeof product.sizes === "string" ? JSON.parse(product.sizes) : [];
-        const sizeIndex = sizes.findIndex((size: any) => size.size === item.size);
-        sizes[sizeIndex].stock -= 1;
+        const sizes = product.sizes;
+        const sizeIndex = (sizes as Size[]).findIndex((size: any) => size.size === item.size);
+        (sizes as Size[])[sizeIndex].stock -= 1;
 
         await db.update(products).set({ sizes: JSON.stringify(sizes) }).where(eq(products.id, item.id));
       }
