@@ -8,11 +8,6 @@ import { authMiddleware } from "../middlewares/auth.middleware";
 import { desc, eq } from "drizzle-orm";
 import { EnhancedFcmMessage, FCM, FcmOptions } from "fcm-cloudflare-workers";
 
-interface Size {
-  size: string;
-  stock: number;
-}
-
 // Esquema de validación
 const createOrderSchema = z.object({
   order: z.array(z.object({
@@ -48,14 +43,11 @@ ordersRoute.post('/create', zValidator("json", createOrderSchema), async (c) => 
       shopUsername: username
     }).$returningId();
 
-    let productsArr = []
     // Insertar los items de la orden
     for (const item of order) {
       const [product] = await db.select()
       .from(products)
       .where(eq(products.id, item.id));
-
-      productsArr.push(product);
 
       await db.insert(orderItems).values({
         productId: item.id,
@@ -65,11 +57,11 @@ ordersRoute.post('/create', zValidator("json", createOrderSchema), async (c) => 
       });
 
       if (item.size && product.sizes) {
-        // const sizes = product.sizes;
-        // const sizeIndex = sizes.findIndex((size: Size) => size.size === item.size);
-        // sizes[sizeIndex].stock -= 1;
+        const sizes = typeof product.sizes === "string" ? JSON.parse(product.sizes) : [];
+        const sizeIndex = sizes.findIndex((size: any) => size.size === item.size);
+        sizes[sizeIndex].stock -= 1;
 
-        // await db.update(products).set({ sizes }).where(eq(products.id, item.id));
+        await db.update(products).set({ sizes: JSON.stringify(sizes) }).where(eq(products.id, item.id));
       }
       else if (product.stock) {
         await db.update(products).set({ stock: product.stock - 1 }).where(eq(products.id, item.id));
@@ -77,47 +69,46 @@ ordersRoute.post('/create', zValidator("json", createOrderSchema), async (c) => 
     }
 
     // Obtener el token FCM del usuario
-    // const user = await db.select().from(users).where(eq(users.username, username));
+    const user = await db.select().from(users).where(eq(users.username, username));
 
-    // if (user[0].fcmToken) {
-    //   // Configurar FCM con la cuenta de servicio (la librería se encargará de generar y cachear el access token)
-    //   const fcmOptions = new FcmOptions({
-    //     serviceAccount:{
-    //       "type": process.env.FCM_TYPE || "",
-    //       "project_id": process.env.FCM_PROJECT_ID || "",
-    //       "private_key_id": process.env.FCM_PRIVATE_KEY_ID || "",
-    //       "private_key": process.env.FCM_PRIVATE_KEY || "",
-    //       "client_email": process.env.FCM_CLIENT_EMAIL || "",
-    //       "client_id": process.env.FCM_CLIENT_ID || "",
-    //       "auth_uri": process.env.FCM_AUTH_URI || "",
-    //       "token_uri": process.env.FCM_TOKEN_URI || "",
-    //       "auth_provider_x509_cert_url": process.env.FCM_AUTH_PROVIDER_X509_CERT_URL || "",
-    //       "client_x509_cert_url": process.env.FCM_CLIENT_X509_CERT_URL || "",
-    //     }        
-    //   });
-    //   const fcm = new FCM(fcmOptions);
+    if (user[0].fcmToken) {
+      // Configurar FCM con la cuenta de servicio (la librería se encargará de generar y cachear el access token)
+      const fcmOptions = new FcmOptions({
+        serviceAccount:{
+          "type": process.env.FCM_TYPE || "",
+          "project_id": process.env.FCM_PROJECT_ID || "",
+          "private_key_id": process.env.FCM_PRIVATE_KEY_ID || "",
+          "private_key": process.env.FCM_PRIVATE_KEY || "",
+          "client_email": process.env.FCM_CLIENT_EMAIL || "",
+          "client_id": process.env.FCM_CLIENT_ID || "",
+          "auth_uri": process.env.FCM_AUTH_URI || "",
+          "token_uri": process.env.FCM_TOKEN_URI || "",
+          "auth_provider_x509_cert_url": process.env.FCM_AUTH_PROVIDER_X509_CERT_URL || "",
+          "client_x509_cert_url": process.env.FCM_CLIENT_X509_CERT_URL || "",
+        }        
+      });
+      const fcm = new FCM(fcmOptions);
 
-    //   const message: EnhancedFcmMessage = {
-    //     notification: {
-    //         title: "Nuevo pedido! 😁",
-    //         body: `Tienes un nuevo pedido de $${price}`,
-    //     },
-    //   }
+      const message: EnhancedFcmMessage = {
+        notification: {
+            title: "Nuevo pedido! 😁",
+            body: `Tienes un nuevo pedido de $${price}`,
+        },
+      }
       
-      // try {
-      //   await fcm.sendToToken(message, user[0].fcmToken);
-      // } catch (error: any) {
-      //   return c.json({ message: "Error fcm" + error.message }, 200);
-      // }
-    // }
+      try {
+        await fcm.sendToToken(message, user[0].fcmToken);
+      } catch (error: any) {
+        return c.json({ message: "Erorr fcm "+ error.message }, 200);
+      }
+    }
 
 
     // Nota: La lógica de FCM se ha eliminado. Si necesitas notificaciones, configura un servicio compatible.
 
     return c.json({ 
       message: 'Orden creada exitosamente',
-      newOrder,
-      productsArr
+      newOrder
     }, 201);
   } catch (error: any) {
     return c.json({ message: error.message }, 500); // Cambiamos el código de estado a 500 para errores
