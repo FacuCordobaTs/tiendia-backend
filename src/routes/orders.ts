@@ -99,7 +99,7 @@ ordersRoute.post('/create', zValidator("json", createOrderSchema), async (c) => 
       try {
         await fcm.sendToToken(message, user[0].fcmToken);
       } catch (error: any) {
-        return c.json({ message: "Erorr fcm "+ error.message }, 200);
+        return c.json({ message: "Erorr fcm "+ error.message, user: user[0] }, 200);
       }
     }
 
