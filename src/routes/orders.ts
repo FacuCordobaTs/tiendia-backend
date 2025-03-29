@@ -77,39 +77,39 @@ ordersRoute.post('/create', zValidator("json", createOrderSchema), async (c) => 
     }
 
     // Obtener el token FCM del usuario
-    const user = await db.select().from(users).where(eq(users.username, username));
+    // const user = await db.select().from(users).where(eq(users.username, username));
 
-    if (user[0].fcmToken) {
-      // Configurar FCM con la cuenta de servicio (la librería se encargará de generar y cachear el access token)
-      const fcmOptions = new FcmOptions({
-        serviceAccount:{
-          "type": process.env.FCM_TYPE || "",
-          "project_id": process.env.FCM_PROJECT_ID || "",
-          "private_key_id": process.env.FCM_PRIVATE_KEY_ID || "",
-          "private_key": process.env.FCM_PRIVATE_KEY || "",
-          "client_email": process.env.FCM_CLIENT_EMAIL || "",
-          "client_id": process.env.FCM_CLIENT_ID || "",
-          "auth_uri": process.env.FCM_AUTH_URI || "",
-          "token_uri": process.env.FCM_TOKEN_URI || "",
-          "auth_provider_x509_cert_url": process.env.FCM_AUTH_PROVIDER_X509_CERT_URL || "",
-          "client_x509_cert_url": process.env.FCM_CLIENT_X509_CERT_URL || "",
-        }        
-      });
-      const fcm = new FCM(fcmOptions);
+    // if (user[0].fcmToken) {
+    //   // Configurar FCM con la cuenta de servicio (la librería se encargará de generar y cachear el access token)
+    //   const fcmOptions = new FcmOptions({
+    //     serviceAccount:{
+    //       "type": process.env.FCM_TYPE || "",
+    //       "project_id": process.env.FCM_PROJECT_ID || "",
+    //       "private_key_id": process.env.FCM_PRIVATE_KEY_ID || "",
+    //       "private_key": process.env.FCM_PRIVATE_KEY || "",
+    //       "client_email": process.env.FCM_CLIENT_EMAIL || "",
+    //       "client_id": process.env.FCM_CLIENT_ID || "",
+    //       "auth_uri": process.env.FCM_AUTH_URI || "",
+    //       "token_uri": process.env.FCM_TOKEN_URI || "",
+    //       "auth_provider_x509_cert_url": process.env.FCM_AUTH_PROVIDER_X509_CERT_URL || "",
+    //       "client_x509_cert_url": process.env.FCM_CLIENT_X509_CERT_URL || "",
+    //     }        
+    //   });
+    //   const fcm = new FCM(fcmOptions);
 
-      const message: EnhancedFcmMessage = {
-        notification: {
-            title: "Nuevo pedido! 😁",
-            body: `Tienes un nuevo pedido de $${price}`,
-        },
-      }
+    //   const message: EnhancedFcmMessage = {
+    //     notification: {
+    //         title: "Nuevo pedido! 😁",
+    //         body: `Tienes un nuevo pedido de $${price}`,
+    //     },
+    //   }
       
-      try {
-        await fcm.sendToToken(message, user[0].fcmToken);
-      } catch (error: any) {
-        return c.json({ message: error.message }, 200);
-      }
-    }
+      // try {
+      //   await fcm.sendToToken(message, user[0].fcmToken);
+      // } catch (error: any) {
+      //   return c.json({ message: "Error fcm" + error.message }, 200);
+      // }
+    // }
 
 
     // Nota: La lógica de FCM se ha eliminado. Si necesitas notificaciones, configura un servicio compatible.
