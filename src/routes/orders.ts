@@ -48,11 +48,14 @@ ordersRoute.post('/create', zValidator("json", createOrderSchema), async (c) => 
       shopUsername: username
     }).$returningId();
 
+    let productsArr = []
     // Insertar los items de la orden
     for (const item of order) {
       const [product] = await db.select()
       .from(products)
       .where(eq(products.id, item.id));
+
+      productsArr.push(product);
 
       await db.insert(orderItems).values({
         productId: item.id,
@@ -62,11 +65,11 @@ ordersRoute.post('/create', zValidator("json", createOrderSchema), async (c) => 
       });
 
       if (item.size && product.sizes) {
-        const sizes = product.sizes;
-        const sizeIndex = (sizes as Size[]).findIndex((size: any) => size.size === item.size);
-        (sizes as Size[])[sizeIndex].stock -= 1;
+        // const sizes = product.sizes;
+        // const sizeIndex = sizes.findIndex((size: Size) => size.size === item.size);
+        // sizes[sizeIndex].stock -= 1;
 
-        await db.update(products).set({ sizes: JSON.stringify(sizes) }).where(eq(products.id, item.id));
+        // await db.update(products).set({ sizes }).where(eq(products.id, item.id));
       }
       else if (product.stock) {
         await db.update(products).set({ stock: product.stock - 1 }).where(eq(products.id, item.id));
@@ -113,7 +116,8 @@ ordersRoute.post('/create', zValidator("json", createOrderSchema), async (c) => 
 
     return c.json({ 
       message: 'Orden creada exitosamente',
-      newOrder
+      newOrder,
+      productsArr
     }, 201);
   } catch (error: any) {
     return c.json({ message: error.message }, 500); // Cambiamos el código de estado a 500 para errores
