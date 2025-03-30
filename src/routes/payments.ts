@@ -95,7 +95,7 @@ paymentsRoute.post('/createPreference/:username', zValidator("json", createPrefe
       },
       body: JSON.stringify({
         items,
-        notification_url: "https://ecommerceplantilla-back.fileit-contact.workers.dev/api/payments/notification",
+        notification_url: "https://api.tiendia.app/api/payments/notification",
         metadata: {
           order_id
         }
@@ -178,7 +178,7 @@ paymentsRoute.get('/connect/:code', async (c) => {
         client_id: 6137280226622490,
         grant_type: "authorization_code",
         code,
-        redirect_uri: 'https://ecommerce-admin-eyh.pages.dev/loadingmp'
+        redirect_uri: 'https://admin.tiendia.app/loadingmp'
       })
     });
 
@@ -246,7 +246,7 @@ paymentsRoute.post('/create-subscription', async (c) => {
         back_urls: {
           success: `http://localhost:5173/completeProfile`,
         },
-        notification_url: "https://ecommerceplantilla-back.fileit-contact.workers.dev/api/payments/webhook"
+        notification_url: "https://api.tiendia.app/api/payments/webhook"
       }),
     });
     const preference = await response.json();
