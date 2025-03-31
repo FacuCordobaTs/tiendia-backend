@@ -18,7 +18,8 @@ const app = new Hono();
 const allowedOrigins = [
   'https://admin.tiendia.app',
   'https://tiendia.app',
-  'http://localhost:5173' // Desarrollo local
+  'http://localhost:5173', // Desarrollo local
+  "https://api.mercadopago.com"
 ];
 
 // Crear directorio para uploads si no existe

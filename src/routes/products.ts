@@ -9,7 +9,10 @@ import { eq } from "drizzle-orm";
 import UUID from "uuid-js";
 import { writeFile, unlink } from "fs/promises";
 import { join } from "path";
+import * as fs from "fs";
+import { GoogleGenAI } from "@google/genai";
 
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
@@ -267,3 +270,65 @@ export const productsRoute = new Hono()
       return c.json({ message: "Error al eliminar el producto" }, 500);
     }
   });
+  productsRoute.post("/generate-ad/:id", authMiddleware, async (c) => {
+    const db = drizzle(pool);
+    const id = Number(c.req.param("id"));
+    try {
+      const product = await db.select().from(products).where(eq(products.id, id));
+
+      if (!product || product.length === 0) {
+        return c.json({ message: "Producto no encontrado" }, 404);
+      }
+
+      if (!product[0].imageURL) {
+        return c.json({ message: "El producto no tiene imagen" }, 400);
+      }
+      
+      const imagePath = join(UPLOAD_DIR, product[0].imageURL?.split("/").pop() || "");
+      const imageData = fs.readFileSync(imagePath);
+      const base64Image = imageData.toString('base64');
+      
+      // Send product image and description to the API to generate an ad image
+      const contents = [
+        { text: "Can you add a llama next to the image?" },
+        {
+            inlineData: {
+                mimeType: 'image/png',
+                data: base64Image
+            }
+        }
+    ];
+    
+    const response = await ai.models.generateContent({
+      model: 'gemini-2.0-flash-exp-image-generation',
+      contents: contents,
+      config: {
+          responseModalities: ['Text', 'Image']
+      },
+      });
+      
+      if (!response.candidates || response.candidates.length === 0 || !response.candidates[0].content || !response.candidates[0].content.parts) {
+        throw new Error("No candidates found");
+      }
+
+      for (const part of response.candidates[0].content.parts) {
+        if (part.inlineData) {
+          const imageData = part.inlineData.data;
+          if (!imageData) {
+            throw new Error("Image data is undefined");
+          }
+          const buffer = Buffer.from(imageData, 'base64');
+          const uuid = UUID.create().toString();
+          const fileName = `${uuid}.png`;
+          const filePath = join(UPLOAD_DIR, fileName);
+          await writeFile(filePath, buffer);
+          return c.json({ message: "Anuncio generado correctamente", imageUrl: `/uploads/${fileName}` }, 200);
+        }
+      }
+
+
+    } catch (error) {
+      console.error("Error generando anuncio:", error);
+      return c.json({ message: "Error al generar el anuncio" }, 500);
+    }
+  })
