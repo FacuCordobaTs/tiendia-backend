@@ -7,16 +7,24 @@ import { products } from "../db/schema";
 import { authMiddleware } from "../middlewares/auth.middleware";
 import { eq } from "drizzle-orm";
 import UUID from "uuid-js";
-import { writeFile, unlink } from "fs/promises";
+import { readFile, writeFile, unlink } from "fs/promises";
 import { join } from "path";
 import * as fs from "fs";
 import { GoogleGenAI } from "@google/genai";
+
 
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
 const UPLOAD_DIR = join(process.cwd(), "public", "uploads");
+
+interface WorkerResponse {
+  message?: string;
+  generatedImageBase64?: string;
+  error?: string;
+  details?: any;
+}
 
 async function saveImage(base64String: string): Promise<string> {
   const base64Data = base64String.replace(/^data:image\/\w+;base64,/, "");
@@ -269,13 +277,140 @@ export const productsRoute = new Hono()
       console.error("Error eliminando producto:", error);
       return c.json({ message: "Error al eliminar el producto" }, 500);
     }
-  });
-  productsRoute.post("/generate-ad/:id", async (c) => {
-    const response = await fetch("https://gemini-worker.facucordoba200.workers.dev")
-    if (response.ok) {
-      const data: Record<string, any> = await response.json();
+  })
+  // ... tus otras rutas (.post('/create'), .get('/list'), etc.) ...
+  .post("/generate-ad/:id", authMiddleware, async (c) => {
+    const id = Number(c.req.param("id"));
+    const db = drizzle(pool);
+    const workerUrl = "https://gemini-worker.facucordoba200.workers.dev";
 
-      return c.json(data, 200);
+    if (isNaN(id)) {
+      return c.json({ error: "ID de producto inválido" }, { status: 400 }); // Usa init object
     }
 
+    try {
+      // 1. Buscar el producto
+      const productResult = await db
+        .select({
+          name: products.name,
+          description: products.description,
+          price: products.price,
+          imageURL: products.imageURL,
+        })
+        .from(products)
+        .where(eq(products.id, id))
+        .limit(1);
+
+      if (!productResult || productResult.length === 0) {
+        return c.json({ message: "Producto no encontrado" }, { status: 404 }); // Usa init object
+      }
+      const product = productResult[0];
+
+      // 2. Verificar imagen original
+      if (!product.imageURL) {
+        return c.json(
+          { message: "El producto no tiene una imagen para generar publicidad." },
+          { status: 400 } // Usa init object
+        );
+      }
+
+      // 3. Leer imagen original y convertir a Base64
+      const originalImageName = product.imageURL.split("/").pop();
+       if (!originalImageName) {
+         console.error("No se pudo extraer el nombre de archivo de:", product.imageURL);
+         return c.json({ message: "Error al procesar la URL de la imagen original." }, { status: 500 });
+       }
+      const originalImagePath = join(UPLOAD_DIR, originalImageName);
+      let originalImageBase64: string;
+      let originalMimeType: string;
+
+      try {
+        const imageData = await readFile(originalImagePath); // Ahora debería encontrar readFile
+        originalImageBase64 = imageData.toString("base64");
+        const extension = originalImageName.split(".").pop()?.toLowerCase();
+        if (extension === "jpg" || extension === "jpeg") originalMimeType = "image/jpeg";
+        else if (extension === "png") originalMimeType = "image/png";
+        else if (extension === "webp") originalMimeType = "image/webp";
+        else {
+           console.warn(`Tipo MIME desconocido para ${originalImageName}, usando image/jpeg.`);
+           originalMimeType = "image/jpeg";
+        }
+      } catch (readError: any) {
+        if (readError.code === 'ENOENT') {
+             console.error("Archivo de imagen original no encontrado en:", originalImagePath);
+             return c.json({ message: "Archivo de imagen original no encontrado." }, { status: 404 });
+        }
+        console.error("Error al leer la imagen original:", readError);
+        return c.json({ message: "Error al leer la imagen original del producto." }, { status: 500 });
+      }
+
+      // 4. Enviar datos al Worker
+      console.log(`Enviando solicitud al worker para el producto ID: ${id}`);
+      const workerPayload = {
+        productName: product.name,
+        productDescription: product.description,
+        productPrice: product.price,
+        imageBase64: originalImageBase64,
+        mimeType: originalMimeType,
+      };
+
+      const response = await fetch(workerUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(workerPayload),
+      });
+
+      console.log(`Respuesta del worker recibida con estado: ${response.status}`);
+
+      if (!response.ok) {
+        const errorBody = await response.text();
+        console.error("Error desde el worker:", response.status, errorBody);
+   
+        // --- NUEVA FORMA ---
+        // 1. Establece el código de estado usando c.status()
+        //    Hono espera un tipo específico, pero podemos forzarlo o usar un fallback.
+        //    Probemos casteando a 'any' primero por simplicidad.
+        try {
+           c.status(response.status as any); // O intenta con StatusCode si la importaste
+        } catch(e) {
+            console.warn(`Could not set status to ${response.status}. Falling back to 500.`, e)
+            c.status(500); // Código de fallback si falla el casteo/status dinámico
+        }
+   
+        // 2. Devuelve SÓLO el cuerpo JSON con c.json()
+        return c.json({
+            message: `Error al generar la publicidad: ${response.statusText}`,
+            details: errorBody
+        });
+        // --- FIN NUEVA FORMA ---
+     }
+
+      const workerResponse = await response.json() as WorkerResponse; // <--- CORRECCIÓN AQUÍ (Assertion)
+
+      // 5. Verificar si el worker devolvió la imagen Base64 generada
+      if (!workerResponse || typeof workerResponse.generatedImageBase64 !== 'string') { // <--- CORRECCIÓN AQUÍ (Check)
+          console.error("El worker no devolvió 'generatedImageBase64' como string. Respuesta:", workerResponse);
+          return c.json(
+            { message: "La respuesta del worker no contenía la imagen generada en el formato esperado." },
+            { status: 500 } // <- Usa también el objeto init aquí
+          );
+      }
+
+      // 6. Guardar la imagen generada por IA
+      const adImageUrl = await saveImage(`data:image/png;base64,${workerResponse.generatedImageBase64}`); // <--- Ahora es seguro
+
+      // 7. Devolver la URL
+      return c.json(
+        {
+          message: "Publicidad generada y guardada correctamente.",
+          adImageUrl: adImageUrl,
+        },
+        { status: 200 } // <- Usa también el objeto init aquí por consistencia
+      );
+
+    } catch (error: any) {
+      console.error("Error en la ruta /generate-ad:", error);
+      const errorMessage = error.message || "Error interno del servidor al generar la publicidad.";
+      return c.json({ message: errorMessage }, { status: 500 }); // <- Usa también el objeto init aquí
+    }
   })
