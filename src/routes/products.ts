@@ -395,9 +395,16 @@ export const productsRoute = new Hono()
             { status: 500 } // <- Usa también el objeto init aquí
           );
       }
-
+      console.log(workerResponse)
       // 6. Guardar la imagen generada por IA
-      const adImageUrl = await saveImage(`data:image/png;base64,${workerResponse.generatedImageBase64}`); // <--- Ahora es seguro
+      let adImageUrl: string;
+     try {
+       adImageUrl = await saveImage(`data:image/png;base64,${workerResponse.generatedImageBase64}`); // <--- Ahora es seguro
+     } catch (error: any) {
+        console.error("Error al guardar la imagen generada:", error);
+        return c.json({ message: "Error al guardar la imagen generada por el worker." }, { status: 500 });
+     }
+     console.log(`Imagen generada guardada en: ${adImageUrl}`);
 
       // 7. Devolver la URL
       return c.json(
