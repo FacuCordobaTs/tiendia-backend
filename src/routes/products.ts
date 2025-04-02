@@ -19,13 +19,6 @@ const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
 const UPLOAD_DIR = join(process.cwd(), "public", "uploads");
 
-interface WorkerResponse {
-  message?: string;
-  generatedImageBase64?: string;
-  error?: string;
-  details?: any;
-}
-
 async function saveImage(base64String: string): Promise<string> {
   const base64Data = base64String.replace(/^data:image\/\w+;base64,/, "");
   const buffer = Buffer.from(base64Data, "base64");
@@ -429,13 +422,6 @@ export const productsRoute = new Hono()
 
       // 4. Enviar datos al Worker
       console.log(`Enviando solicitud al worker para el producto ID: ${id}`);
-      console.log({
-        productName: product.name,
-        productDescription: product.description,
-        productPrice: product.price,
-        imageBase64: originalImageBase64,
-        mimeType: originalMimeType,
-      })
       const workerPayload = {
         productName: product.name,
         productDescription: product.description,
@@ -475,32 +461,32 @@ export const productsRoute = new Hono()
         // --- FIN NUEVA FORMA ---
      }
 
-      const workerResponse = await response.json() as WorkerResponse; // <--- CORRECCIÓN AQUÍ (Assertion)
+      type WorkerResponse = {
+        candidates: Array<{
+          parts: {
+        inlinedata: {
+          data: string;
+        };
+          };
+        }>;
+      };
 
-      console.log(workerResponse)
-      // 5. Verificar si el worker devolvió la imagen Base64 generada
-      if (!workerResponse || typeof workerResponse.generatedImageBase64 !== 'string') { // <--- CORRECCIÓN AQUÍ (Check)
-          console.error("El worker no devolvió 'generatedImageBase64' como string. Respuesta:", workerResponse);
-          return c.json(
-            { message: "La respuesta del worker no contenía la imagen generada en el formato esperado." },
-            { status: 500 } // <- Usa también el objeto init aquí
-          );
-      }
-      // 6. Guardar la imagen generada por IA
+      const workerResponse: WorkerResponse = await response.json();
       let adImageUrl: string;
-     try {
-       adImageUrl = await saveImage(`data:image/png;base64,${workerResponse.generatedImageBase64}`); // <--- Ahora es seguro
-     } catch (error: any) {
-        console.error("Error al guardar la imagen generada:", error);
-        return c.json({ message: "Error al guardar la imagen generada por el worker." }, { status: 500 });
-     }
-     console.log(`Imagen generada guardada en: ${adImageUrl}`);
+      if (workerResponse.candidates.length > 0 && workerResponse.candidates[0].parts.inlinedata.data) {
+        try {
+          adImageUrl = await saveImage(`data:image/png;base64,${workerResponse.candidates[0].parts.inlinedata.data}`); // <--- Ahora es seguro
+        } catch (error: any) {
+          console.error("Error al guardar la imagen generada:", error);
+          return c.json({ message: "Error al guardar la imagen generada por el worker." }, { status: 500 });
+        }
+      }
 
       // 7. Devolver la URL
       return c.json(
         {
           message: "Publicidad generada y guardada correctamente.",
-          adImageUrl: adImageUrl,
+          adImageUrl
         },
         { status: 200 } // <- Usa también el objeto init aquí por consistencia
       );
