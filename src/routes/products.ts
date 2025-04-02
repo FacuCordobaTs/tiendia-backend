@@ -290,7 +290,7 @@ export const productsRoute = new Hono()
     const { name, price, description, image, id } = c.req.valid("json");
     const db = drizzle(pool);
     let imageUrl: string | null = null;
-
+    console.log("image:", image);
     try {
       if (image) {
         const [meta, data] = image.split(",");
@@ -429,6 +429,13 @@ export const productsRoute = new Hono()
 
       // 4. Enviar datos al Worker
       console.log(`Enviando solicitud al worker para el producto ID: ${id}`);
+      console.log({
+        productName: product.name,
+        productDescription: product.description,
+        productPrice: product.price,
+        imageBase64: originalImageBase64,
+        mimeType: originalMimeType,
+      })
       const workerPayload = {
         productName: product.name,
         productDescription: product.description,
@@ -470,6 +477,7 @@ export const productsRoute = new Hono()
 
       const workerResponse = await response.json() as WorkerResponse; // <--- CORRECCIÓN AQUÍ (Assertion)
 
+      console.log(workerResponse)
       // 5. Verificar si el worker devolvió la imagen Base64 generada
       if (!workerResponse || typeof workerResponse.generatedImageBase64 !== 'string') { // <--- CORRECCIÓN AQUÍ (Check)
           console.error("El worker no devolvió 'generatedImageBase64' como string. Respuesta:", workerResponse);
@@ -478,7 +486,6 @@ export const productsRoute = new Hono()
             { status: 500 } // <- Usa también el objeto init aquí
           );
       }
-      console.log(workerResponse)
       // 6. Guardar la imagen generada por IA
       let adImageUrl: string;
      try {
