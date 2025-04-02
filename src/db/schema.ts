@@ -5,7 +5,7 @@ export const users = mysqlTable("shops", {
     email: varchar("email", { length: 255 }).unique().notNull(),
     password: varchar("password", { length: 255 }).notNull(),
     fcmToken: varchar("fcm_token", { length: 255 }),
-    username: varchar("username", { length: 255 }),
+    username: varchar("username", { length: 255 }).unique(),
     shopname: varchar("shopname", { length: 255 }),
     address: varchar("address", { length: 255 }),
     profileImageURL: varchar("profile_image_url", { length: 255 }),
@@ -35,7 +35,7 @@ export const products = mysqlTable("products", {
     stock: int("stock"),
     createdAt: timestamp("created_at").notNull(),
     createdBy: varchar("created_by", { length: 255 }),
-    createdById: int("created_by_id").references(() => users.id),
+    createdById: int("createdById").references(() => users.id),
 });
 
 export const orders = mysqlTable("orders", {
