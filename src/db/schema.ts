@@ -5,8 +5,8 @@ export const users = mysqlTable("shops", {
     email: varchar("email", { length: 255 }).unique().notNull(),
     password: varchar("password", { length: 255 }).notNull(),
     fcmToken: varchar("fcm_token", { length: 255 }),
-    username: varchar("username", { length: 255 }).unique().notNull(),
-    shopname: varchar("shopname", { length: 255 }).notNull(),
+    username: varchar("username", { length: 255 }),
+    shopname: varchar("shopname", { length: 255 }),
     address: varchar("address", { length: 255 }),
     profileImageURL: varchar("profile_image_url", { length: 255 }),
     plan: varchar("plan", { length: 50 }),
@@ -34,7 +34,8 @@ export const products = mysqlTable("products", {
     sizes: json("sizes"),
     stock: int("stock"),
     createdAt: timestamp("created_at").notNull(),
-    createdBy: varchar("created_by", { length: 255 }).notNull(),
+    createdBy: varchar("created_by", { length: 255 }),
+    createdById: int("created_by_id").references(() => users.id),
 });
 
 export const orders = mysqlTable("orders", {
@@ -55,4 +56,10 @@ export const orderItems = mysqlTable("order_items", {
     productId: int("product_id").notNull(),
     size: varchar("size", { length: 255 }),
     comment: varchar("comment", { length: 255 }),
+});
+
+export const images = mysqlTable("images", {
+    id: int("id").primaryKey().autoincrement(),
+    url: varchar("url", { length: 255 }).notNull(),
+    productId: int("product_id").references(() => products.id).notNull(),
 });

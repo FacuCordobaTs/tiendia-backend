@@ -67,6 +67,14 @@ const productSchema = z.object({
   stock: z.number().optional(),
 });
 
+const productSchema2 = z.object({
+  name: z.string().min(3).max(255),
+  price: z.number().min(1),
+  description: z.string().min(3).max(255),
+  image: z.string().optional(),
+  id: z.number(),
+});
+
 const updateProductSchema = z.object({
   name: z.string().min(3).max(255),
   price: z.number().min(1),
@@ -278,7 +286,82 @@ export const productsRoute = new Hono()
       return c.json({ message: "Error al eliminar el producto" }, 500);
     }
   })
-  // ... tus otras rutas (.post('/create'), .get('/list'), etc.) ...
+  .post("/create2", authMiddleware, zValidator("json", productSchema2), async (c) => {
+    const { name, price, description, image, id } = c.req.valid("json");
+    const db = drizzle(pool);
+    let imageUrl: string | null = null;
+
+    try {
+      if (image) {
+        const [meta, data] = image.split(",");
+        const mimeType = meta.match(/:(.*?);/)?.[1];
+
+        if (!mimeType || !ALLOWED_MIME_TYPES.includes(mimeType)) {
+          return c.json({ error: "Tipo de archivo no permitido" }, 400);
+        }
+
+        const buffer = Buffer.from(data, "base64");
+        if (buffer.byteLength > MAX_FILE_SIZE) {
+          return c.json({ error: "La imagen es demasiado grande" }, 400);
+        }
+
+        imageUrl = await saveImage(image);
+      }
+
+      await db.insert(products).values({
+        name,
+        price,
+        description,
+        imageURL: imageUrl,
+        createdAt: new Date(),
+        createdById: id,
+      });
+
+      return c.json(
+        {
+          message: "Producto registrado correctamente",
+          product: {
+            name,
+            price,
+            description,
+            imageURL: imageUrl,
+            createdAt: new Date(),
+          },
+        },
+        200
+      );
+    } catch (error) {
+      console.error("Error:", error);
+      return c.json({ message: "Error al registrar el producto" }, 500);
+    }
+  })
+  .get("/list2/:id", async (c) => {
+    const db = drizzle(pool);
+    const id = c.req.param("id");
+
+    try {
+      const productsListed = await db
+        .select({
+          id: products.id,
+          name: products.name,
+          price: products.price,
+          description: products.description,
+          imageURL: products.imageURL,
+          createdAt: products.createdAt,
+        })
+        .from(products)
+        .where(eq(products.createdById, Number(id)));
+
+      if (!productsListed || productsListed.length === 0) {
+        return c.json({ message: "No hay productos registrados" }, 404);
+      }
+
+
+      return c.json({ products: productsListed }, 200);
+    } catch (error) {
+      return c.json({ message: "Error al obtener los productos" }, 400);
+    }
+  })
   .post("/generate-ad/:id", authMiddleware, async (c) => {
     const id = Number(c.req.param("id"));
     const db = drizzle(pool);
