@@ -441,19 +441,7 @@ export const productsRoute = new Hono()
       if (!response.ok) {
         const errorBody = await response.text();
         console.error("Error desde el worker:", response.status, errorBody);
-   
-        // --- NUEVA FORMA ---
-        // 1. Establece el código de estado usando c.status()
-        //    Hono espera un tipo específico, pero podemos forzarlo o usar un fallback.
-        //    Probemos casteando a 'any' primero por simplicidad.
-        try {
-           c.status(response.status as any); // O intenta con StatusCode si la importaste
-        } catch(e) {
-            console.warn(`Could not set status to ${response.status}. Falling back to 500.`, e)
-            c.status(500); // Código de fallback si falla el casteo/status dinámico
-        }
-   
-        // 2. Devuelve SÓLO el cuerpo JSON con c.json()
+
         return c.json({
             message: `Error al generar la publicidad: ${response.statusText}`,
             details: errorBody
@@ -476,20 +464,19 @@ export const productsRoute = new Hono()
       if (workerResponse.candidates.length > 0 && workerResponse.candidates[0].parts.inlinedata.data) {
         try {
           adImageUrl = await saveImage(`data:image/png;base64,${workerResponse.candidates[0].parts.inlinedata.data}`); // <--- Ahora es seguro
+
+          return c.json(
+            {
+              message: "Publicidad generada correctamente.",
+              adImageUrl: adImageUrl,
+            },
+            { status: 200 } 
+          );
         } catch (error: any) {
           console.error("Error al guardar la imagen generada:", error);
           return c.json({ message: "Error al guardar la imagen generada por el worker." }, { status: 500 });
         }
       }
-
-      // 7. Devolver la URL
-      return c.json(
-        {
-          message: "Publicidad generada y guardada correctamente.",
-          adImageUrl
-        },
-        { status: 200 } // <- Usa también el objeto init aquí por consistencia
-      );
 
     } catch (error: any) {
       console.error("Error en la ruta /generate-ad:", error);
