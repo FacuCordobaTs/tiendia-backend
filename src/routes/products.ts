@@ -450,34 +450,37 @@ export const productsRoute = new Hono()
      }
 
       type WorkerResponse = {
-        candidates: Array<{
-          parts: {
-        inlinedata: {
-          data: string;
-        };
+        message: string,
+        geminiData: {
+          candidates: {
+            content: {
+              parts: {
+                inlineData: {
+                  data: string;
+                };
+              };
+            }[];
           };
-        }>;
+        }
       };
 
       const workerResponse: WorkerResponse = await response.json();
+      console.log(workerResponse.geminiData.candidates[0].content.parts[0].inlineData.data)
 
-      console.log("Respuesta del worker:", workerResponse);
-      let adImageUrl: string;
-      if (workerResponse.candidates.length > 0 && workerResponse.candidates[0].parts.inlinedata.data) {
-        try {
-          adImageUrl = await saveImage(`data:image/png;base64,${workerResponse.candidates[0].parts.inlinedata.data}`); // <--- Ahora es seguro
+      // let adImageUrl: string;
+      try {
+        // adImageUrl = await saveImage(`data:image/png;base64,${workerResponse.candidates[0].parts.inlinedata.data}`); // <--- Ahora es seguro
 
-          return c.json(
-            {
-              message: "Publicidad generada correctamente.",
-              adImageUrl: adImageUrl,
-            },
-            { status: 200 } 
-          );
-        } catch (error: any) {
-          console.error("Error al guardar la imagen generada:", error);
-          return c.json({ message: "Error al guardar la imagen generada por el worker." }, { status: 500 });
-        }
+        return c.json(
+          {
+            message: "Publicidad generada correctamente.",
+            // adImageUrl: adImageUrl,
+          },
+          { status: 200 } 
+        );
+      } catch (error: any) {
+        console.error("Error al guardar la imagen generada:", error);
+        return c.json({ message: "Error al guardar la imagen generada por el worker." }, { status: 500 });
       }
 
     } catch (error: any) {
