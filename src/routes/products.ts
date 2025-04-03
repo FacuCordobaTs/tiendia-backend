@@ -450,31 +450,28 @@ export const productsRoute = new Hono()
      }
 
       type WorkerResponse = {
-        message: string,
         geminiData: {
-          candidates: {
+          candidates: Array<{
             content: {
-              parts: {
+              parts: Array<{
                 inlineData: {
                   data: string;
                 };
-              };
-            }[];
-          };
-        }
+              }>;
+            };
+          }>;
+        };
       };
 
       const workerResponse: WorkerResponse = await response.json();
-      console.log(workerResponse.geminiData.candidates[0].content.parts[0].inlineData.data)
 
-      // let adImageUrl: string;
       try {
-        // adImageUrl = await saveImage(`data:image/png;base64,${workerResponse.candidates[0].parts.inlinedata.data}`); // <--- Ahora es seguro
-
+        const adImageUrl = await saveImage(`data:image/png;base64,${workerResponse.geminiData.candidates[0].content.parts[0].inlineData.data}`); // <--- Ahora es seguro
+        console.log("Imagen de publicidad guardada en:", adImageUrl);
         return c.json(
           {
             message: "Publicidad generada correctamente.",
-            // adImageUrl: adImageUrl,
+            adImageUrl: adImageUrl,
           },
           { status: 200 } 
         );
