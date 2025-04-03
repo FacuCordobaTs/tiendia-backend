@@ -460,6 +460,8 @@ export const productsRoute = new Hono()
       };
 
       const workerResponse: WorkerResponse = await response.json();
+
+      console.log("Respuesta del worker:", workerResponse);
       let adImageUrl: string;
       if (workerResponse.candidates.length > 0 && workerResponse.candidates[0].parts.inlinedata.data) {
         try {
