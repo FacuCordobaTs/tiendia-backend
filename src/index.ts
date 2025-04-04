@@ -90,5 +90,5 @@ function getMimeType(path: string): string {
 export default {
   port: 3000,
   fetch: app.fetch, 
-  idleTimeout: 100000, 
+  idleTimeout: 255, 
 };
