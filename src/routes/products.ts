@@ -364,13 +364,21 @@ export const productsRoute = new Hono()
       return c.json({ error: "ID de producto inválido" }, { status: 400 }); // Usa init object
     }
 
+    let includeModel = true;
+    try {
+        const body = await c.req.json();
+        if (typeof body?.includeModel === 'boolean') {
+             includeModel = body.includeModel;
+        }
+        console.log(`Opción 'includeModel' recibida: ${includeModel}`);
+    } catch (e) {
+         console.warn("No se pudo parsear el body o 'includeModel' no presente/válido.");
+    }
+
     try {
       // 1. Buscar el producto
       const productResult = await db
         .select({
-          name: products.name,
-          description: products.description,
-          price: products.price,
           imageURL: products.imageURL,
         })
         .from(products)
@@ -423,11 +431,9 @@ export const productsRoute = new Hono()
       // 4. Enviar datos al Worker
       console.log(`Enviando solicitud al worker para el producto ID: ${id}`);
       const workerPayload = {
-        productName: product.name,
-        productDescription: product.description,
-        productPrice: product.price,
         imageBase64: originalImageBase64,
         mimeType: originalMimeType,
+        includeModel: includeModel,
       };
 
       const response = await fetch(workerUrl, {
