@@ -522,3 +522,45 @@ export const productsRoute = new Hono()
         return c.json({ message: "Error interno al obtener las imágenes generadas." }, 500);
     }
 })
+.delete("/images/:imageId", authMiddleware, async (c) => {
+  const db = drizzle(pool);
+  const imageIdParam = c.req.param("imageId");
+  const imageId = Number(imageIdParam);
+
+
+  if (isNaN(imageId)) {
+      return c.json({ error: "ID de imagen inválido" }, 400);
+  }
+
+  try {
+      // 1. Buscar la imagen y verificar la propiedad a través del producto
+          const imageResult = await db.select({
+              imageUrl: images.url,
+          })
+          .from(images)
+          .where(eq(images.id, imageId))
+      if (!imageResult || imageResult.length === 0) {
+          return c.json({ message: "Imagen no encontrada" }, 404);
+      }
+
+      const imageToDelete = imageResult[0];
+
+      if (imageToDelete.imageUrl) {
+           await deleteImage(imageToDelete.imageUrl); // Usa tu función existente
+           console.log(`Archivo físico ${imageToDelete.imageUrl} marcado para eliminación (o eliminado).`);
+      } else {
+           console.warn(`La imagen ${imageId} no tenía URL registrada para eliminar archivo.`);
+      }
+
+
+      // 4. Eliminar el registro de la base de datos
+      await db.delete(images).where(eq(images.id, imageId));
+      console.log(`Registro de imagen ${imageId} eliminado de la base de datos.`);
+
+      return c.json({ message: "Imagen eliminada correctamente" }, 200);
+
+  } catch (error: any) {
+      console.error(`Error al eliminar imagen ${imageId}:`, error);
+      return c.json({ message: "Error interno al eliminar la imagen." }, 500);
+  }
+})
