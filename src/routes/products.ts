@@ -3,9 +3,9 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { drizzle } from "drizzle-orm/mysql2";
 import { pool } from "../db";
-import { products } from "../db/schema";
+import { images, products } from "../db/schema";
 import { authMiddleware } from "../middlewares/auth.middleware";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import UUID from "uuid-js";
 import { readFile, writeFile, unlink } from "fs/promises";
 import { join } from "path";
@@ -467,7 +467,14 @@ export const productsRoute = new Hono()
 
       try {
         const adImageUrl = await saveImage(`data:image/png;base64,${workerResponse.geminiData.candidates[0].content.parts[0].inlineData.data}`); // <--- Ahora es seguro
-        console.log("Imagen de publicidad guardada en:", adImageUrl);
+
+        await db.insert(images).values({
+          url: adImageUrl,      // La URL relativa guardada localmente
+          productId: id,         // El ID del producto para el que se generó
+          createdAt: new Date(), // Fecha de creación
+        });
+        console.log(`Registro insertado en tabla 'images' para producto ${id}, URL: ${adImageUrl}`);
+
         return c.json(
           {
             message: "Publicidad generada correctamente.",
@@ -486,3 +493,32 @@ export const productsRoute = new Hono()
       return c.json({ message: errorMessage }, { status: 500 }); // <- Usa también el objeto init aquí
     }
   })
+  .get("/images/by-user/:userId", authMiddleware, async (c) => {
+    const db = drizzle(pool);
+    const userIdParam = c.req.param("userId");
+    const userId = Number(userIdParam);
+
+    if (isNaN(userId)) {
+        return c.json({ error: "ID de usuario inválido" }, 400);
+    }
+
+    try {
+        const userImages = await db.select({
+            imageId: images.id,
+            imageUrl: images.url,
+            productId: images.productId,
+            productName: products.name, // Opcional: incluir el nombre del producto
+            createdAt: images.createdAt,
+        })
+        .from(images)
+        .innerJoin(products, eq(images.productId, products.id))
+        .where(eq(products.createdById, userId)); // Compara con el ID numérico del usuario
+
+        // Devuelve las imágenes encontradas (puede ser un array vacío)
+        return c.json({ images: userImages }, 200);
+
+    } catch (error: any) {
+        console.error(`Error al obtener imágenes para el usuario ${userId}:`, error);
+        return c.json({ message: "Error interno al obtener las imágenes generadas." }, 500);
+    }
+})

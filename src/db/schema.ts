@@ -62,4 +62,5 @@ export const images = mysqlTable("images", {
     id: int("id").primaryKey().autoincrement(),
     url: varchar("url", { length: 255 }).notNull(),
     productId: int("product_id").references(() => products.id).notNull(),
+    createdAt: timestamp("created_at").notNull(),
 });
