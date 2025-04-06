@@ -6,7 +6,6 @@ import { join } from 'path';
 import { existsSync, mkdirSync } from 'fs';
 import { authRoute } from './routes/auth';
 import { productsRoute } from './routes/products';
-import ordersRoute from './routes/orders';
 import paymentsRoute from './routes/payments';
 import { config } from 'dotenv';
 import path from 'path';
@@ -19,7 +18,6 @@ const allowedOrigins = [
   'https://admin.tiendia.app',
   'https://tiendia.app',
   'http://localhost:5173', // Desarrollo local
-  "https://api.mercadopago.com"
 ];
 
 // Crear directorio para uploads si no existe
@@ -68,7 +66,6 @@ app.get('/', (c) => c.text('Hello, World!'));
 app.basePath("/api")
   .route("/auth", authRoute)
   .route("/products", productsRoute)
-  .route("/orders", ordersRoute)
   .route("/payments", paymentsRoute);
 
 // Función auxiliar para determinar el tipo MIME

@@ -10,12 +10,17 @@ import UUID from "uuid-js";
 import { readFile, writeFile, unlink } from "fs/promises";
 import { join } from "path";
 import * as fs from "fs";
-import { GoogleGenAI } from "@google/genai";
+import jwt  from "jsonwebtoken";
+import { getCookie } from "hono/cookie";
 
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
+const generateProductSchema = z.object({
+  image: z.string().min(10),
+  includeModel: z.boolean().optional().default(false),
+});
 
 const UPLOAD_DIR = join(process.cwd(), "public", "uploads");
 
@@ -53,158 +58,20 @@ async function deleteImage(imageUrl: string): Promise<void> {
 const productSchema = z.object({
   name: z.string().min(3).max(255),
   price: z.number().min(1),
-  description: z.string().min(3).max(255),
-  image: z.string().optional(),
-  username: z.string(),
-  sizes: z.array(z.object({ size: z.string(), stock: z.number() })).optional(),
-  stock: z.number().optional(),
-});
-
-const productSchema2 = z.object({
-  name: z.string().min(3).max(255),
-  price: z.number().min(1),
-  description: z.string().min(3).max(255),
   image: z.string().optional(),
   id: z.number(),
 });
 
 const updateProductSchema = z.object({
   name: z.string().min(3).max(255),
-  price: z.number().min(1),
-  description: z.string().min(3).max(255),
   imageBase64: z.string().optional(),
   id: z.number(),
-  sizes: z.array(z.object({ size: z.string(), stock: z.number() })).optional().nullable(),
-  stock: z.number().optional().nullable(),
 });
 
 export const productsRoute = new Hono()
-  .post("/create", authMiddleware, zValidator("json", productSchema), async (c) => {
-    const { name, price, description, image, username, sizes, stock } = c.req.valid("json");
-    const db = drizzle(pool);
-    let imageUrl: string | null = null;
-
-    try {
-      if (image) {
-        const [meta, data] = image.split(",");
-        const mimeType = meta.match(/:(.*?);/)?.[1];
-
-        if (!mimeType || !ALLOWED_MIME_TYPES.includes(mimeType)) {
-          return c.json({ error: "Tipo de archivo no permitido" }, 400);
-        }
-
-        const buffer = Buffer.from(data, "base64");
-        if (buffer.byteLength > MAX_FILE_SIZE) {
-          return c.json({ error: "La imagen es demasiado grande" }, 400);
-        }
-
-        imageUrl = await saveImage(image);
-      }
-
-      await db.insert(products).values({
-        name,
-        price,
-        description,
-        imageURL: imageUrl,
-        sizes: sizes ? JSON.stringify(sizes) : null,
-        stock: stock || null,
-        createdAt: new Date(),
-        createdBy: username,
-      });
-
-      return c.json(
-        {
-          message: "Producto registrado correctamente",
-          product: {
-            name,
-            price,
-            description,
-            imageURL: imageUrl,
-            sizes,
-            stock,
-            createdAt: new Date(),
-            createdBy: username,
-          },
-        },
-        200
-      );
-    } catch (error) {
-      console.error("Error:", error);
-      return c.json({ message: "Error al registrar el producto" }, 500);
-    }
-  })
-
-  .get("/list/:username", async (c) => {
-    const db = drizzle(pool);
-    const username = c.req.param("username");
-
-    try {
-      const productsListed = await db
-        .select({
-          id: products.id,
-          name: products.name,
-          price: products.price,
-          description: products.description,
-          imageURL: products.imageURL,
-          sizes: products.sizes,
-          stock: products.stock,
-          createdAt: products.createdAt,
-        })
-        .from(products)
-        .where(eq(products.createdBy, username));
-
-      if (!productsListed || productsListed.length === 0) {
-        return c.json({ message: "No hay productos registrados" }, 404);
-      }
-
-      const parsedProducts = productsListed.map((product: any) => ({
-        ...product,
-        sizes: product.sizes ? JSON.parse(product.sizes) : null,
-      }));
-
-      return c.json({ products: parsedProducts }, 200);
-    } catch (error) {
-      return c.json({ message: "Error al obtener los productos" }, 400);
-    }
-  })
-
-  .get("/get/:id", async (c) => {
-    const db = drizzle(pool);
-    const id = Number(c.req.param("id"));
-
-    try {
-      const product = await db
-        .select({
-          id: products.id,
-          name: products.name,
-          price: products.price,
-          description: products.description,
-          imageURL: products.imageURL,
-          sizes: products.sizes,
-          stock: products.stock,
-          createdAt: products.createdAt,
-        })
-        .from(products)
-        .where(eq(products.id, id));
-
-      if (!product || product.length === 0) {
-        return c.json({ message: "Producto no encontrado" }, 404);
-      }
-
-      const parsedProduct = {
-        ...product[0],
-        sizes: typeof product[0].sizes === "string" ? JSON.parse(product[0].sizes) : null,
-      };
-
-      return c.json({ products: parsedProduct }, 200);
-    } catch (error) {
-      return c.json({ message: "Error al obtener el producto" }, 400);
-    }
-  })
-
   .put("/update", zValidator("json", updateProductSchema), async (c) => {
     try {
-      const { name, price, description, imageBase64, id, sizes, stock } = c.req.valid("json");
+      const { name, imageBase64, id } = c.req.valid("json");
       const db = drizzle(pool);
 
       let imageURL: string | undefined;
@@ -229,11 +96,7 @@ export const productsRoute = new Hono()
         .update(products)
         .set({
           name,
-          price,
-          description,
           ...(imageURL && { imageURL }),
-          ...(sizes && { sizes: JSON.stringify(sizes) }),
-          ...(stock !== undefined && { stock }),
         })
         .where(eq(products.id, id));
 
@@ -242,12 +105,7 @@ export const productsRoute = new Hono()
           message: "Producto actualizado correctamente",
           product: {
             name,
-            price,
-            description,
             imageURL,
-            sizes,
-            stock,
-            createdAt: new Date(),
           },
         },
         200
@@ -279,56 +137,7 @@ export const productsRoute = new Hono()
       return c.json({ message: "Error al eliminar el producto" }, 500);
     }
   })
-  .post("/create2", authMiddleware, zValidator("json", productSchema2), async (c) => {
-    const { name, price, description, image, id } = c.req.valid("json");
-    const db = drizzle(pool);
-    let imageUrl: string | null = null;
-    console.log("image:", image);
-    try {
-      if (image) {
-        const [meta, data] = image.split(",");
-        const mimeType = meta.match(/:(.*?);/)?.[1];
-
-        if (!mimeType || !ALLOWED_MIME_TYPES.includes(mimeType)) {
-          return c.json({ error: "Tipo de archivo no permitido" }, 400);
-        }
-
-        const buffer = Buffer.from(data, "base64");
-        if (buffer.byteLength > MAX_FILE_SIZE) {
-          return c.json({ error: "La imagen es demasiado grande" }, 400);
-        }
-
-        imageUrl = await saveImage(image);
-      }
-
-      await db.insert(products).values({
-        name,
-        price,
-        description,
-        imageURL: imageUrl,
-        createdAt: new Date(),
-        createdById: id,
-      });
-
-      return c.json(
-        {
-          message: "Producto registrado correctamente",
-          product: {
-            name,
-            price,
-            description,
-            imageURL: imageUrl,
-            createdAt: new Date(),
-          },
-        },
-        200
-      );
-    } catch (error) {
-      console.error("Error:", error);
-      return c.json({ message: "Error al registrar el producto" }, 500);
-    }
-  })
-  .get("/list2/:id", async (c) => {
+  .get("/list/:id", async (c) => {
     const db = drizzle(pool);
     const id = c.req.param("id");
 
@@ -337,8 +146,6 @@ export const productsRoute = new Hono()
         .select({
           id: products.id,
           name: products.name,
-          price: products.price,
-          description: products.description,
           imageURL: products.imageURL,
           createdAt: products.createdAt,
         })
@@ -569,4 +376,139 @@ export const productsRoute = new Hono()
       console.error(`Error al eliminar imagen ${imageId}:`, error);
       return c.json({ message: "Error interno al eliminar la imagen." }, 500);
   }
+})
+
+productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("json", generateProductSchema), async (c) => {
+  const { image: userImageBase64, includeModel } = c.req.valid("json");
+  const db = drizzle(pool);
+  
+  const workerUrl = "https://gemini-worker.facucordoba200.workers.dev";
+  const token = getCookie(c, 'token');
+  if (!token) {
+      return c.json({ message: 'No hay token' }, 200);
+  }
+
+  const decoded = await new Promise((resolve, reject) => {
+      jwt.verify(token, process.env.TOKEN_SECRET || 'my-secret', (error, decoded) => {
+          if (error) reject(error);
+          resolve(decoded);
+      });
+  });
+  const userId = (decoded as jwt.JwtPayload).id
+
+  if (!userId) {
+    return c.json({ message: "Usuario no autenticado" }, { status: 401 });
+  }
+
+
+  let originalImageUrl: string | null = null;
+  let generatedImageUrl: string | null = null;
+  let productName = "Producto";
+
+  const [meta, data] = userImageBase64.split(",");
+  const mimeType = meta?.match(/:(.*?);/)?.[1];
+
+  if (!mimeType || !ALLOWED_MIME_TYPES.includes(mimeType)) {
+    return c.json({ error: "Tipo de archivo no permitido" }, 400);
+  }
+  const buffer = Buffer.from(data, "base64");
+  if (buffer.byteLength > MAX_FILE_SIZE) {
+    return c.json({ error: "La imagen es demasiado grande" }, 400);
+  }
+
+  originalImageUrl = await saveImage(userImageBase64);
+  console.log("Imagen original guardada en:", originalImageUrl);
+
+  console.log("Llamando al worker para generar nombre...");
+  const nameWorkerPayload = {
+    task: 'generate_name', // Indicador de tarea
+    imageBase64: data,
+    mimeType: mimeType,
+  };
+
+  const nameWorkerResponse = await fetch(workerUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(nameWorkerPayload),
+  });
+
+  if (!nameWorkerResponse.ok) {
+    const errorBody = await nameWorkerResponse.text();
+    console.error("Error del worker (generando nombre):", nameWorkerResponse.status, errorBody);
+  } else {
+    try {
+      const nameResult: { generatedName?: string; error?: string } = await nameWorkerResponse.json();
+      if (nameResult.generatedName) {
+        productName = nameResult.generatedName;
+        console.log(`Nombre generado por worker: ${productName}`);
+      } else {
+        console.warn("Worker no devolvió nombre generado:", nameResult);
+      }
+    } catch (parseError) {
+        console.error("Error al parsear respuesta del worker (nombre):", parseError)
+    }
+  }
+  console.log(`Llamando al worker para generar imagen (includeModel: ${includeModel})...`);
+  const imageWorkerPayload = {
+    task: 'generate_image',
+    imageBase64: data,
+    mimeType: mimeType,
+    includeModel: includeModel,
+  };
+
+  const imageWorkerResponse = await fetch(workerUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(imageWorkerPayload),
+  });
+  if (!imageWorkerResponse.ok) {
+    const errorBody = await imageWorkerResponse.text();
+    console.error("Error del worker (generando imagen):", imageWorkerResponse.status, errorBody);
+    // Continuar sin imagen generada
+  } else {
+       try {
+          type ImageWorkerResponse = {
+            geminiData?: { candidates: Array<{ content: { parts: Array<{ inlineData?: { data: string; }; }>; }; }>; };
+            message?: string; error?: string;
+          };
+          const imageResult: ImageWorkerResponse = await imageWorkerResponse.json();
+          const generatedImageData = imageResult.geminiData?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+
+          if (generatedImageData) {
+            generatedImageUrl = await saveImage(`data:image/png;base64,${generatedImageData}`);
+            console.log("Imagen generada guardada en:", generatedImageUrl);
+          } else {
+            console.warn("Worker no devolvió imagen generada:", imageResult);
+          }
+      } catch (parseError) {
+         console.error("Error al parsear respuesta del worker (imagen):", parseError)
+      }
+  };
+  const insertedProduct = await db.insert(products).values({
+    name: productName,
+    imageURL: originalImageUrl,
+    createdById: userId,
+    createdAt: new Date(),
+  }).$returningId();
+
+  const productId = insertedProduct[0].id;
+  if (generatedImageUrl) {
+    await db.insert(images).values({
+      url: generatedImageUrl,
+      productId: productId,
+      createdAt: new Date(),
+    });
+  }
+  return c.json(
+    {
+      message: "Producto procesado correctamente.",
+      product: {
+        id: productId,
+        name: productName,
+        originalImageUrl: originalImageUrl,
+        generatedImageUrl: generatedImageUrl,
+      },
+    },
+    { status: 200 }
+  );
 })
