@@ -100,6 +100,17 @@ export const productsRoute = new Hono()
         })
         .where(eq(products.id, id));
 
+        // Eliminar todas las imágenes asociadas al producto
+        const associatedImages = await db.select().from(images).where(eq(images.productId, id));
+
+        for (const image of associatedImages) {
+          if (image.url) {
+            await deleteImage(image.url); // Eliminar archivo físico
+          }
+        }
+
+        await db.delete(images).where(eq(images.productId, id)); // Eliminar registros de la base de datos
+
       return c.json(
         {
           message: "Producto actualizado correctamente",
