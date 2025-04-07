@@ -14,7 +14,6 @@ import { users } from '../db/schema';
 import bcrypt from "bcryptjs";
 import { createAccessToken } from "../libs/jwt";
 import UUID from 'uuid-js';
-import { authMiddleware } from '../middlewares/auth.middleware';
 import { writeFile, unlink } from "fs/promises";
 import { join } from "path";
 
@@ -76,7 +75,7 @@ export const authRoute = new Hono()
                 .where(eq(users.email, email));
 
             if (existingEmail.length) {
-                return c.json({ error: 'Email already used', existingEmail }, 409);
+                return c.json({ error: 'Email ya utilizado', existingEmail }, 409);
             }
 
             const passwordHash = await bcrypt.hash(password, 10);
@@ -100,7 +99,7 @@ export const authRoute = new Hono()
 
             return c.json({ message: 'Usuario registrado correctamente', newUser }, 200);
         } catch (error: any) {
-            return c.json({ message: 'Error al registrar el usuario: ' + error.message }, 400);
+            return c.json({ message: 'Error al registrar el usuario'}, 400);
         }
     })
     // Rutas no modificadas (login, profile, logout, fcm-token) se mantienen igual
