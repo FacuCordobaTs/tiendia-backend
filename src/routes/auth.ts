@@ -36,9 +36,6 @@ async function updateImage(oldUrl: string, newBase64: string): Promise<string> {
     await deleteImage(oldUrl);
     return await saveImage(newBase64);
 }
-console.log('GOOGLE_CLIENT_ID:', process.env.GOOGLE_CLIENT_ID);
-console.log('GOOGLE_CLIENT_SECRET:', process.env.GOOGLE_CLIENT_SECRET);
-console.log('GOOGLE_REDIRECT_URI:', process.env.GOOGLE_REDIRECT_URI);
 
 
 const googleClient = new OAuth2Client(
@@ -285,7 +282,7 @@ export const authRoute = new Hono()
             maxAge: 7 * 24 * 60 * 60,
         });
         
-        return c.redirect(`${process.env.FRONTEND_URL}/dashboard`); 
+        return c.redirect(`https://tiendia.app/home`); 
 
 
     } catch (error: any) {
