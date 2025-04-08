@@ -166,7 +166,7 @@ export const authRoute = new Hono()
         }
         return c.json({ user }, 200);
     } catch (error) {
-        throw error;
+        return c.json({ message: 'Error al obtener el perfil del usuario'}, 400);
     }
 })
 .delete('/logout', async (c) => {
