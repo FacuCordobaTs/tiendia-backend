@@ -1,11 +1,11 @@
-import { mysqlTable, varchar, int, timestamp } from "drizzle-orm/mysql-core";
+import { mysqlTable, varchar, int, timestamp, text } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
     id: int("id").primaryKey().autoincrement(),
     email: varchar("email", { length: 255 }).unique().notNull(),
-    password: varchar("password", { length: 255 }).notNull(),
-    category: varchar("category", { length: 50 }),
-    createdAt: timestamp("created_at").notNull()
+    password: varchar("password", { length: 255 }),
+    createdAt: timestamp("created_at").notNull(),
+    googleId: varchar('google_id', { length: 255 }).unique(),
 });
 
 export const products = mysqlTable("products", {
