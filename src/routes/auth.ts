@@ -144,26 +144,30 @@ export const authRoute = new Hono()
     }
 })
 .get('/profile', async (c) => {
-    const token = getCookie(c, 'token');
-    if (!token) {
-        return c.json({ message: 'No hay token' }, 200);
-    }
+    try {     
+        const token = getCookie(c, 'token');
+        if (!token) {
+            return c.json({ message: 'No hay token' }, 200);
+        }
 
-    const decoded = await new Promise((resolve, reject) => {
-        jwt.verify(token, process.env.TOKEN_SECRET || 'my-secret', (error, decoded) => {
-            if (error) reject(error);
-            resolve(decoded);
+        const decoded = await new Promise((resolve, reject) => {
+            jwt.verify(token, process.env.TOKEN_SECRET || 'my-secret', (error, decoded) => {
+                if (error) reject(error);
+                resolve(decoded);
+            });
         });
-    });
 
-    const db = drizzle(pool);
-    const user = await db.select().from(users)
-        .where(eq(users.id, (decoded as jwt.JwtPayload).id));
+        const db = drizzle(pool);
+        const user = await db.select().from(users)
+            .where(eq(users.id, (decoded as jwt.JwtPayload).id));
 
-    if (!user.length) {
-        return c.json({ message: 'Usuario no encontrado' }, 400);
+        if (!user.length) {
+            return c.json({ message: 'Usuario no encontrado' }, 400);
+        }
+        return c.json({ user }, 200);
+    } catch (error) {
+        throw error;
     }
-    return c.json({ user }, 200);
 })
 .delete('/logout', async (c) => {
     deleteCookie(c, 'token');
@@ -194,15 +198,8 @@ export const authRoute = new Hono()
 .get('/google/callback', async (c) => {
     const db = drizzle(pool);
     const code = c.req.query('code');
-    const state = c.req.query('state');
-    const storedState = getCookie(c, 'oauth_state');
-
-    if (!state || !storedState || state !== storedState) {
-        console.error("Invalid OAuth state", { state, storedState });
-            return c.redirect(`https://tiendia.app/login?error=invalid_state`);
-    }
     
-        deleteCookie(c, 'oauth_state', { path: '/api/auth/google/callback' });
+    deleteCookie(c, 'oauth_state', { path: '/api/auth/google/callback' });
 
 
     if (!code) {

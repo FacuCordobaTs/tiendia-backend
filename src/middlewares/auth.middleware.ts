@@ -27,11 +27,9 @@ export const authMiddleware = async (c: any, next: Function) => {
     if (!user) {
       return c.json({ message: 'Usuario no encontrado' }, 400);
     }
-    // Attach user to context
     c.set('user', user);
     await next();
   } catch (error) {
-    console.error('Authentication error:', error);
     return c.json({ message: 'Invalid or expired token' }, 200);
   }
 };
