@@ -36,6 +36,11 @@ async function updateImage(oldUrl: string, newBase64: string): Promise<string> {
     await deleteImage(oldUrl);
     return await saveImage(newBase64);
 }
+console.log('GOOGLE_CLIENT_ID:', process.env.GOOGLE_CLIENT_ID);
+console.log('GOOGLE_CLIENT_SECRET:', process.env.GOOGLE_CLIENT_SECRET);
+console.log('GOOGLE_REDIRECT_URI:', process.env.GOOGLE_REDIRECT_URI);
+
+
 const googleClient = new OAuth2Client(
     process.env.GOOGLE_CLIENT_ID,
     process.env.GOOGLE_CLIENT_SECRET,
@@ -246,7 +251,7 @@ export const authRoute = new Hono()
                 .where(eq(users.id, user.id));
                 user.googleId = googleId; 
             } else if (user.googleId !== googleId) {
-                return c.redirect(`${process.env.FRONTEND_URL}/login?error=email_google_conflict`);
+                return c.redirect(`https://tiendia.app/login?error=email_google_conflict`);
             }
             
 
@@ -286,6 +291,6 @@ export const authRoute = new Hono()
     } catch (error: any) {
         console.error("Google Callback Error:", error);
         
-        return c.redirect(`${process.env.FRONTEND_URL}/login?error=google_callback_failed`);
+        return c.redirect(`https://tiendia.app/login?error=google_callback_failed`);
     }
 });
