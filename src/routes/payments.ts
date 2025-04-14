@@ -56,7 +56,8 @@ paymentsRoute.post("/create-preference", zValidator("json",creditSchema), async 
 });
 
 paymentsRoute.post('/webhook', async (c) => {
-    // const id = await c.req.query('id');
+    const id = await c.req.query('id');
+    console.log("SOLICITUD RECIBIDA MP", id);
     // const url = `https://api.mercadopago.com/merchant_orders/${id}`;
     // const db = drizzle(pool);
 
