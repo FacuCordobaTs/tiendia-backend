@@ -82,3 +82,6 @@ paymentsRoute.post('/webhook', async (c) => {
   
     return c.status(200);
   });
+
+
+export default paymentsRoute
