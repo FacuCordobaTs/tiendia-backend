@@ -62,30 +62,27 @@ paymentsRoute.post('/webhook', async (c) => {
     if (!id) {
         return c.json({ error: 'Missing id parameter' }, 400);
     }
-    // const url = `https://api.mercadopago.com/merchant_orders/${id}`;
-    // const db = drizzle(pool);
+    const url = `https://api.mercadopago.com/merchant_orders/${id}`;
+    const db = drizzle(pool);
 
-    // const response = await fetch(url,{
-    //       headers: {
-    //         'Content-Type': 'application/json',
-    //         'Authorization': 'Bearer ACCES_TOKEN' 
-    //       }
-    // })
+    const response = await fetch(url,{
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ACCES_TOKEN' 
+          }
+    })
 
-    // const data = await response.json() as { metadata: { user_id: number, credits: number } };
-    // const userId = data.metadata.user_id
-    // const credits = data.metadata.credits;
+    const data = await response.json() as { metadata: { user_id: number, credits: number } };
+    const userId = data.metadata.user_id
+    const credits = data.metadata.credits;
 
-    // if (userId && credits)  {
-    //     await db.update(users)
-    //         .set({
-    //             credits
-    //         })
+    if (userId && credits)  {
+        await db.update(users)
+            .set({
+                credits
+            })
+    }
     return c.json({ message: 'Webhook processed successfully' }, 200);
-
-    // }
-  
-    return c.status(200);
   });
 
 
