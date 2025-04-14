@@ -6,6 +6,7 @@ export const users = mysqlTable("users", {
     password: varchar("password", { length: 255 }),
     createdAt: timestamp("created_at").notNull(),
     googleId: varchar('google_id', { length: 255 }).unique(),
+    credits: int("credits").default(0),
 });
 
 export const products = mysqlTable("products", {
