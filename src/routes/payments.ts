@@ -68,7 +68,7 @@ paymentsRoute.post('/webhook', async (c) => {
     const response = await fetch(url,{
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': 'Bearer ACCES_TOKEN' 
+            'Authorization': 'Bearer '+ process.env.MP_ACCESS_TOKEN 
           }
     })
 
