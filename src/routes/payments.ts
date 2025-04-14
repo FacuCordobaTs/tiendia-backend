@@ -56,8 +56,12 @@ paymentsRoute.post("/create-preference", zValidator("json",creditSchema), async 
 });
 
 paymentsRoute.post('/webhook', async (c) => {
-    const id = await c.req.query('id');
+    const id = c.req.query('id');
     console.log("SOLICITUD RECIBIDA MP", id);
+
+    if (!id) {
+        return c.json({ error: 'Missing id parameter' }, 400);
+    }
     // const url = `https://api.mercadopago.com/merchant_orders/${id}`;
     // const db = drizzle(pool);
 
@@ -77,7 +81,7 @@ paymentsRoute.post('/webhook', async (c) => {
     //         .set({
     //             credits
     //         })
-    //         .where(eq(users.id, userId));
+    return c.json({ message: 'Webhook processed successfully' }, 200);
 
     // }
   
