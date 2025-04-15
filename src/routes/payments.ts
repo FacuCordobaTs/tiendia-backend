@@ -23,7 +23,12 @@ paymentsRoute.post("/create-preference", zValidator("json",creditSchema), async 
     if (!token) return c.json({ error: 'Unauthorized' }, 401);
     const db = drizzle(pool);
 
-    const decoded = jwt.verify(token, process.env.TOKEN_SECRET || '')
+    const decoded = await new Promise((resolve, reject) => {
+        jwt.verify(token, process.env.TOKEN_SECRET || 'my-secret', (error, decoded) => {
+            if (error) reject(error);
+            resolve(decoded);
+        });
+    });
 
     const response = await fetch('https://api.mercadopago.com/checkout/preferences', {
       method: 'POST',
