@@ -53,10 +53,10 @@ paymentsRoute.post("/create-preference", zValidator("json",creditSchema), async 
       await db.update(users).set({
         lastPreferenceId: preference.id
       })
-      .where(eq(users.id, (decoded as JwtPayload).userId));
+      .where(eq(users.id, (decoded as JwtPayload).id));
     }
 
-
+    console.log("PREFERENCEID: ", preference.id)
     return c.json({ preference });
 });
 
