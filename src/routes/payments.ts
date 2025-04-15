@@ -92,6 +92,8 @@ paymentsRoute.post('/webhook', async (c) => {
     const user = await db.select().from(users)
         .where(eq(users.lastPreferenceId, preferenceId));
 
+    console.log(user[0])
+
     if (user[0] && user[0].credits) {
         await db.update(users).set({
           credits: user[0].credits + credits
