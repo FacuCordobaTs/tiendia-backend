@@ -7,6 +7,7 @@ export const users = mysqlTable("users", {
     createdAt: timestamp("created_at").notNull(),
     googleId: varchar('google_id', { length: 255 }).unique(),
     credits: int("credits").default(0),
+    lastPreferenceId: varchar("last_preference_id", { length: 255 }),
 });
 
 export const products = mysqlTable("products", {

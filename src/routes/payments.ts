@@ -21,6 +21,7 @@ paymentsRoute.post("/create-preference", zValidator("json",creditSchema), async 
     const { credits } = c.req.valid("json");
     const token = getCookie(c, 'token');
     if (!token) return c.json({ error: 'Unauthorized' }, 401);
+    const db = drizzle(pool);
 
     const decoded = jwt.verify(token, process.env.TOKEN_SECRET || '')
 
@@ -40,17 +41,21 @@ paymentsRoute.post("/create-preference", zValidator("json",creditSchema), async 
             currency_id: "ARS"
           }
         ],
-        metadata: {
-          user_id: (decoded as JwtPayload).id,
-          credits
-        },
         back_urls: {
           success: `https://tiendia.app/home`,
         },
         notification_url: "https://api.tiendia.app/api/payments/webhook"
       }),
     });
-    const preference = await response.json();
+    const preference = await response.json() as { id: string };
+
+    if (preference && preference.id) {
+      await db.update(users).set({
+        lastPreferenceId: preference.id
+      })
+      .where(eq(users.id, (decoded as JwtPayload).userId));
+    }
+
 
     return c.json({ preference });
 });
@@ -73,17 +78,21 @@ paymentsRoute.post('/webhook', async (c) => {
           }
     })
 
-    const data = await response.json() as { metadata: { user_id: number, credits: number } };
+    const data = await response.json() as { items: { id: string, title: string, unit_price: number, quantity: number }[], preference_id: string };
     console.log("Data: " ,data)
-    const userId = data.metadata.user_id
-    const credits = data.metadata.credits;
 
-    if (userId && credits)  {
-        await db.update(users)
-            .set({
-                credits
-            })
+    const credits = data.items[0].unit_price;
+    const preferenceId = data.preference_id;
+
+    const user = await db.select().from(users)
+        .where(eq(users.lastPreferenceId, preferenceId));
+
+    if (user[0] && user[0].credits) {
+        await db.update(users).set({
+          credits: user[0].credits + credits
+      }).where(eq(users.lastPreferenceId, preferenceId));
     }
+
     return c.json({ message: 'Webhook processed successfully' }, 200);
     } catch (error) {
         console.error("Error processing webhook:", error);
