@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { drizzle } from "drizzle-orm/mysql2";
 import { pool } from "../db";
-import { images, products } from "../db/schema";
+import { images, products, users } from "../db/schema";
 import { authMiddleware } from "../middlewares/auth.middleware";
 import { eq, sql } from "drizzle-orm";
 import UUID from "uuid-js";
@@ -176,6 +176,15 @@ export const productsRoute = new Hono()
     const db = drizzle(pool);
     const workerUrl = "https://gemini-worker.facucordoba200.workers.dev";
 
+    const credits = await db.select({
+      credits: users.credits,
+    })
+    .from(users)
+    .where(eq(users.id, id))
+
+    if (credits[0].credits && credits[0].credits < 50) {
+      return c.json({ message: "Creditos no suficientes" }, { status: 400 });
+    }
     if (isNaN(id)) {
       return c.json({ error: "ID de producto inválido" }, { status: 400 }); // Usa init object
     }
@@ -297,6 +306,13 @@ export const productsRoute = new Hono()
         });
         console.log(`Registro insertado en tabla 'images' para producto ${id}, URL: ${adImageUrl}`);
 
+
+        if (credits[0] && credits[0].credits) { 
+          await db.update(users).set({
+            credits: credits[0].credits - 50,
+          })
+        }
+
         return c.json(
           {
             message: "Publicidad generada correctamente.",
@@ -409,6 +425,15 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
     return c.json({ message: "Usuario no autenticado" }, { status: 401 });
   }
 
+  const credits = await db.select({
+    credits: users.credits,
+  })
+  .from(users)
+  .where(eq(users.id, userId))
+
+  if (credits[0].credits && credits[0].credits < 50) {
+    return c.json({ message: "Creditos no suficientes" }, { status: 400 });
+  }
 
   let originalImageUrl: string | null = null;
   let generatedImageUrl: string | null = null;
@@ -508,6 +533,13 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
       createdAt: new Date(),
     });
   }
+
+  if (credits[0] && credits[0].credits) { 
+    await db.update(users).set({
+      credits: credits[0].credits - 50,
+    })
+  }
+  
   return c.json(
     {
       message: "Producto procesado correctamente.",

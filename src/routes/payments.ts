@@ -56,7 +56,8 @@ paymentsRoute.post("/create-preference", zValidator("json",creditSchema), async 
 });
 
 paymentsRoute.post('/webhook', async (c) => {
-    const id = c.req.query('id');
+    try {
+      const id = c.req.query('id');
     console.log("SOLICITUD RECIBIDA MP", id);
 
     if (!id) {
@@ -73,6 +74,7 @@ paymentsRoute.post('/webhook', async (c) => {
     })
 
     const data = await response.json() as { metadata: { user_id: number, credits: number } };
+    console.log("Data: " ,data)
     const userId = data.metadata.user_id
     const credits = data.metadata.credits;
 
@@ -83,6 +85,10 @@ paymentsRoute.post('/webhook', async (c) => {
             })
     }
     return c.json({ message: 'Webhook processed successfully' }, 200);
+    } catch (error) {
+        console.error("Error processing webhook:", error);
+        return c.json({ error: 'Internal Server Error' }, 500);
+    }
   });
 
 
