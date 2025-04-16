@@ -10,7 +10,7 @@ import UUID from "uuid-js";
 import { readFile, writeFile, unlink } from "fs/promises";
 import { join } from "path";
 import * as fs from "fs";
-import jwt  from "jsonwebtoken";
+import jwt, {JwtPayload} from "jsonwebtoken";
 import { getCookie } from "hono/cookie";
 import { GeminiRequestQueue } from "../libs/GeminiRequestQueue";
 
@@ -177,14 +177,26 @@ export const productsRoute = new Hono()
     const db = drizzle(pool);
     const workerUrl = "https://gemini-worker.facucordoba200.workers.dev";
     const requestQueue = GeminiRequestQueue.getInstance();
+    const token = getCookie(c, 'token');
+    if (!token) return c.json({ error: 'Unauthorized' }, 401);
+
+    const decoded = await new Promise((resolve, reject) => {
+      jwt.verify(token, process.env.TOKEN_SECRET || 'my-secret', (error, decoded) => {
+          if (error) reject(error);
+          resolve(decoded);
+      });
+  });
+
+  const userId = (decoded as JwtPayload).id
+
 
     const credits = await db.select({
       credits: users.credits,
     })
     .from(users)
-    .where(eq(users.id, id))
+    .where(eq(users.id, userId))
 
-    if (credits[0].credits && credits[0].credits < 50) {
+    if (credits && credits[0] && credits[0].credits && credits[0].credits < 50) {
       return c.json({ message: "Creditos no suficientes" }, { status: 400 });
     }
     if (isNaN(id)) {
