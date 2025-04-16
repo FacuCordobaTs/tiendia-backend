@@ -7,6 +7,7 @@ import { existsSync, mkdirSync } from 'fs';
 import { authRoute } from './routes/auth';
 import { productsRoute } from './routes/products';
 import paymentsRoute from './routes/payments';
+import creditsRouter from './routes/credits'; // Importar la nueva ruta de créditos
 import { config } from 'dotenv';
 import path from 'path';
 
@@ -66,7 +67,8 @@ app.get('/', (c) => c.text('Hello, World!'));
 app.basePath("/api")
   .route("/auth", authRoute)
   .route("/products", productsRoute)
-  .route("/payments", paymentsRoute);
+  .route("/payments", paymentsRoute)
+  .route("/credits", creditsRouter); // Registrar la nueva ruta de créditos
 
 // Función auxiliar para determinar el tipo MIME
 function getMimeType(path: string): string {
