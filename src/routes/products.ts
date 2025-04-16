@@ -12,6 +12,7 @@ import { join } from "path";
 import * as fs from "fs";
 import jwt  from "jsonwebtoken";
 import { getCookie } from "hono/cookie";
+import { GeminiRequestQueue } from "../libs/GeminiRequestQueue";
 
 
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
@@ -175,6 +176,7 @@ export const productsRoute = new Hono()
     const id = Number(c.req.param("id"));
     const db = drizzle(pool);
     const workerUrl = "https://gemini-worker.facucordoba200.workers.dev";
+    const requestQueue = GeminiRequestQueue.getInstance();
 
     const credits = await db.select({
       credits: users.credits,
@@ -253,7 +255,7 @@ export const productsRoute = new Hono()
         return c.json({ message: "Error al leer la imagen original del producto." }, { status: 500 });
       }
 
-      // 4. Enviar datos al Worker
+      // 4. Enviar datos al Worker a través de la cola
       console.log(`Enviando solicitud al worker para el producto ID: ${id}`);
       const workerPayload = {
         imageBase64: originalImageBase64,
@@ -261,24 +263,9 @@ export const productsRoute = new Hono()
         includeModel: includeModel,
       };
 
-      const response = await fetch(workerUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(workerPayload),
-      });
-
-      console.log(`Respuesta del worker recibida con estado: ${response.status}`);
-
-      if (!response.ok) {
-        const errorBody = await response.text();
-        console.error("Error desde el worker:", response.status, errorBody);
-
-        return c.json({
-            message: `Error al generar la publicidad: ${response.statusText}`,
-            details: errorBody
-        });
-        // --- FIN NUEVA FORMA ---
-     }
+      // Usar la cola para gestionar la solicitud
+      const workerResponse = await requestQueue.enqueue(workerPayload, workerUrl);
+      console.log(`Respuesta del worker recibida correctamente`);
 
       type WorkerResponse = {
         geminiData: {
@@ -293,8 +280,6 @@ export const productsRoute = new Hono()
           }>;
         };
       };
-
-      const workerResponse: WorkerResponse = await response.json();
 
       try {
         const adImageUrl = await saveImage(`data:image/png;base64,${workerResponse.geminiData.candidates[0].content.parts[0].inlineData.data}`); // <--- Ahora es seguro
@@ -408,6 +393,7 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
   const db = drizzle(pool);
   
   const workerUrl = "https://gemini-worker.facucordoba200.workers.dev";
+  const requestQueue = GeminiRequestQueue.getInstance();
   const token = getCookie(c, 'token');
   if (!token) {
       return c.json({ message: 'No hay token' }, 200);
@@ -460,28 +446,20 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
     mimeType: mimeType,
   };
 
-  const nameWorkerResponse = await fetch(workerUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(nameWorkerPayload),
-  });
-
-  if (!nameWorkerResponse.ok) {
-    const errorBody = await nameWorkerResponse.text();
-    console.error("Error del worker (generando nombre):", nameWorkerResponse.status, errorBody);
-  } else {
-    try {
-      const nameResult: { generatedName?: string; error?: string } = await nameWorkerResponse.json();
-      if (nameResult.generatedName) {
-        productName = nameResult.generatedName;
-        console.log(`Nombre generado por worker: ${productName}`);
-      } else {
-        console.warn("Worker no devolvió nombre generado:", nameResult);
-      }
-    } catch (parseError) {
-        console.error("Error al parsear respuesta del worker (nombre):", parseError)
+  // Usar la cola para la solicitud de nombre
+  try {
+    const nameResult = await requestQueue.enqueue(nameWorkerPayload, workerUrl);
+    if (nameResult.generatedName) {
+      productName = nameResult.generatedName;
+      console.log(`Nombre generado por worker: ${productName}`);
+    } else {
+      console.warn("Worker no devolvió nombre generado:", nameResult);
     }
+  } catch (error) {
+    console.error("Error del worker (generando nombre):", error);
+    // Continuar con el nombre predeterminado
   }
+  
   console.log(`Llamando al worker para generar imagen (includeModel: ${includeModel})...`);
   const imageWorkerPayload = {
     task: 'generate_image',
@@ -490,34 +468,21 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
     includeModel: includeModel,
   };
 
-  const imageWorkerResponse = await fetch(workerUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(imageWorkerPayload),
-  });
-  if (!imageWorkerResponse.ok) {
-    const errorBody = await imageWorkerResponse.text();
-    console.error("Error del worker (generando imagen):", imageWorkerResponse.status, errorBody);
-    // Continuar sin imagen generada
-  } else {
-       try {
-          type ImageWorkerResponse = {
-            geminiData?: { candidates: Array<{ content: { parts: Array<{ inlineData?: { data: string; }; }>; }; }>; };
-            message?: string; error?: string;
-          };
-          const imageResult: ImageWorkerResponse = await imageWorkerResponse.json();
-          const generatedImageData = imageResult.geminiData?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+  // Usar la cola para la solicitud de imagen
+  try {
+    const imageResult = await requestQueue.enqueue(imageWorkerPayload, workerUrl);
+    const generatedImageData = imageResult.geminiData?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
 
-          if (generatedImageData) {
-            generatedImageUrl = await saveImage(`data:image/png;base64,${generatedImageData}`);
-            console.log("Imagen generada guardada en:", generatedImageUrl);
-          } else {
-            console.warn("Worker no devolvió imagen generada:", imageResult);
-          }
-      } catch (parseError) {
-         console.error("Error al parsear respuesta del worker (imagen):", parseError)
-      }
-  };
+    if (generatedImageData) {
+      generatedImageUrl = await saveImage(`data:image/png;base64,${generatedImageData}`);
+      console.log("Imagen generada guardada en:", generatedImageUrl);
+    } else {
+      console.warn("Worker no devolvió imagen generada:", imageResult);
+    }
+  } catch (error) {
+    console.error("Error del worker (generando imagen):", error);
+    // Continuar sin imagen generada
+  }
   const insertedProduct = await db.insert(products).values({
     name: productName,
     imageURL: originalImageUrl,
