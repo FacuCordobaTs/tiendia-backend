@@ -308,6 +308,7 @@ export const productsRoute = new Hono()
           await db.update(users).set({
             credits: credits[0].credits - 50,
           })
+          .where(eq(users.id, userId))
         }
 
         return c.json(
@@ -515,6 +516,7 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
     await db.update(users).set({
       credits: credits[0].credits - 50,
     })
+    .where(eq(users.id, userId))
   }
   
   return c.json(
