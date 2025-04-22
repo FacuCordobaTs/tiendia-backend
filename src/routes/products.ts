@@ -401,6 +401,154 @@ export const productsRoute = new Hono()
   }
 })
 
+// NUEVO ENDPOINT PARA MODIFICAR IMAGEN
+productsRoute.post("/images/modify/:imageId", authMiddleware, zValidator("json", z.object({ prompt: z.string().min(1) })), async (c) => {
+  const db = drizzle(pool);
+  const imageIdParam = c.req.param("imageId");
+  const imageId = Number(imageIdParam);
+  const { prompt } = c.req.valid("json");
+  const workerUrl = "https://gemini-worker.facucordoba200.workers.dev";
+  const requestQueue = GeminiRequestQueue.getInstance();
+
+  if (isNaN(imageId)) {
+    return c.json({ error: "ID de imagen inválido" }, 400);
+  }
+
+  const token = getCookie(c, 'token');
+  if (!token) return c.json({ error: 'Unauthorized' }, 401);
+
+  let userId: number;
+  try {
+    const decoded = await new Promise<JwtPayload>((resolve, reject) => {
+      jwt.verify(token, process.env.TOKEN_SECRET || 'my-secret', (error, decoded) => {
+        if (error) reject(error);
+        resolve(decoded as JwtPayload);
+      });
+    });
+    userId = decoded.id;
+  } catch (error) {
+    return c.json({ error: 'Invalid token' }, 401);
+  }
+
+  try {
+    // 1. Verificar créditos
+    const creditsResult = await db.select({ credits: users.credits }).from(users).where(eq(users.id, userId));
+    const currentCredits = creditsResult[0]?.credits ?? 0;
+    if (currentCredits < 50) { // Asumiendo que modificar cuesta 50 créditos
+      return c.json({ message: "Créditos insuficientes" }, { status: 400 });
+    }
+
+    // 2. Buscar la imagen original y su producto asociado
+    const imageResult = await db.select({
+        imageUrl: images.url,
+        productId: images.productId
+      })
+      .from(images)
+      .where(eq(images.id, imageId))
+      .limit(1);
+
+    if (!imageResult || imageResult.length === 0) {
+      return c.json({ message: "Imagen original no encontrada" }, 404);
+    }
+    const originalImage = imageResult[0];
+
+    if (!originalImage.imageUrl) {
+        return c.json({ message: "La imagen original no tiene URL" }, 400);
+    }
+
+    // 3. Leer imagen original y convertir a Base64
+    const originalImageName = originalImage.imageUrl.split("/").pop();
+    if (!originalImageName) {
+      console.error("No se pudo extraer el nombre de archivo de:", originalImage.imageUrl);
+      return c.json({ message: "Error al procesar la URL de la imagen original." }, { status: 500 });
+    }
+    const originalImagePath = join(UPLOAD_DIR, originalImageName);
+    let originalImageBase64: string;
+    let originalMimeType: string;
+
+    try {
+      const imageData = await readFile(originalImagePath);
+      originalImageBase64 = imageData.toString("base64");
+      const extension = originalImageName.split(".").pop()?.toLowerCase();
+      if (extension === "jpg" || extension === "jpeg") originalMimeType = "image/jpeg";
+      else if (extension === "png") originalMimeType = "image/png";
+      else if (extension === "webp") originalMimeType = "image/webp";
+      else {
+        console.warn(`Tipo MIME desconocido para ${originalImageName}, usando image/jpeg.`);
+        originalMimeType = "image/jpeg";
+      }
+    } catch (readError: any) {
+      if (readError.code === 'ENOENT') {
+        console.error("Archivo de imagen original no encontrado en:", originalImagePath);
+        return c.json({ message: "Archivo de imagen original no encontrado." }, { status: 404 });
+      }
+      console.error("Error al leer la imagen original:", readError);
+      return c.json({ message: "Error al leer la imagen original." }, { status: 500 });
+    }
+
+    // 4. Enviar datos al Worker para modificación
+    console.log(`Enviando solicitud de modificación al worker para imagen ID: ${imageId}`);
+    const workerPayload = {
+      task: 'modify_image', // Nueva tarea para el worker
+      imageBase64: originalImageBase64,
+      mimeType: originalMimeType,
+      prompt: prompt, // Instrucciones del usuario
+    };
+
+    // Usar la cola para gestionar la solicitud
+    const workerResponse = await requestQueue.enqueue(workerPayload, workerUrl);
+    console.log(`Respuesta de modificación del worker recibida`);
+
+    // 5. Procesar respuesta del worker y guardar nueva imagen
+    const modifiedImageData = workerResponse.geminiData?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+
+    if (!modifiedImageData) {
+      console.error("El worker no devolvió datos de imagen modificada:", workerResponse);
+      return c.json({ message: "Error al generar la imagen modificada por el worker." }, { status: 500 });
+    }
+
+    let modifiedImageUrl: string;
+    try {
+      modifiedImageUrl = await saveImage(`data:image/png;base64,${modifiedImageData}`);
+      console.log("Imagen modificada guardada en:", modifiedImageUrl);
+
+      // 6. Insertar registro de la nueva imagen en la BD (asociada al mismo producto)
+      await db.insert(images).values({
+        url: modifiedImageUrl,
+        productId: originalImage.productId, // Asociar al producto original
+        createdAt: new Date(),
+      });
+      console.log(`Registro insertado en tabla 'images' para imagen modificada, URL: ${modifiedImageUrl}`);
+
+      // 7. Deducir créditos
+      await db.update(users).set({
+        credits: currentCredits - 50,
+      })
+      .where(eq(users.id, userId));
+
+      return c.json(
+        {
+          message: "Imagen modificada correctamente.",
+          modifiedImageUrl: modifiedImageUrl,
+        },
+        { status: 200 }
+      );
+    } catch (saveError: any) {
+      console.error("Error al guardar la imagen modificada:", saveError);
+      // Intentar eliminar el archivo si se creó pero falló la inserción en BD
+      if (modifiedImageUrl!) {
+        try { await deleteImage(modifiedImageUrl!); } catch (delErr) { console.error("Error al intentar limpiar imagen guardada tras fallo:", delErr); }
+      }
+      return c.json({ message: "Error al guardar la imagen modificada." }, { status: 500 });
+    }
+
+  } catch (error: any) {
+    console.error(`Error en la ruta /images/modify/${imageId}:`, error);
+    const errorMessage = error.message || "Error interno del servidor al modificar la imagen.";
+    return c.json({ message: errorMessage }, { status: 500 });
+  }
+});
+
 productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("json", generateProductSchema), async (c) => {
   const { image: userImageBase64, includeModel } = c.req.valid("json");
   const db = drizzle(pool);
