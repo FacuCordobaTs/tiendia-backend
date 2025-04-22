@@ -296,11 +296,12 @@ export const productsRoute = new Hono()
       try {
         const adImageUrl = await saveImage(`data:image/png;base64,${workerResponse.geminiData.candidates[0].content.parts[0].inlineData.data}`); // <--- Ahora es seguro
 
-        await db.insert(images).values({
+        const result = await db.insert(images).values({
           url: adImageUrl,      // La URL relativa guardada localmente
           productId: id,         // El ID del producto para el que se generó
           createdAt: new Date(), // Fecha de creación
-        });
+        })
+        .$returningId()
         console.log(`Registro insertado en tabla 'images' para producto ${id}, URL: ${adImageUrl}`);
 
 
@@ -315,7 +316,8 @@ export const productsRoute = new Hono()
           {
             message: "Publicidad generada correctamente.",
             adImageUrl: adImageUrl,
-          },
+            imageId: result[0].id
+            },
           { status: 200 } 
         );
       } catch (error: any) {
