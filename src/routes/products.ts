@@ -447,11 +447,11 @@ productsRoute.post("/images/modify/:imageId", authMiddleware, zValidator("json",
       .where(eq(images.id, imageId))
 
     if (!imageResult ) {
-      return c.json({ message: "Imagen original no encontrada" }, 404);
+      return c.json({ message: "Imagen original no encontrada, con imageId: "+imageId  }, 404);
     }
     const originalImage = imageResult[0];
 
-    if (!originalImage.imageUrl) {
+    if (!imageResult || imageResult.length === 0 || !originalImage || !originalImage.imageUrl) {
         return c.json({ message: "La imagen original no tiene URL" }, 400);
     }
 
