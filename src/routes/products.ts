@@ -514,11 +514,11 @@ productsRoute.post("/images/modify/:imageId", authMiddleware, zValidator("json",
       console.log("Imagen modificada guardada en:", modifiedImageUrl);
 
       // 6. Insertar registro de la nueva imagen en la BD (asociada al mismo producto)
-      await db.insert(images).values({
+      const result = await db.insert(images).values({
         url: modifiedImageUrl,
         productId: originalImage.productId, // Asociar al producto original
         createdAt: new Date(),
-      });
+      }).$returningId();
       console.log(`Registro insertado en tabla 'images' para imagen modificada, URL: ${modifiedImageUrl}`);
 
       // 7. Deducir créditos
@@ -531,6 +531,7 @@ productsRoute.post("/images/modify/:imageId", authMiddleware, zValidator("json",
         {
           message: "Imagen modificada correctamente.",
           modifiedImageUrl: modifiedImageUrl,
+          imageId: result[0].id
         },
         { status: 200 }
       );
