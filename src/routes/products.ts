@@ -653,12 +653,15 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
   }).$returningId();
 
   const productId = insertedProduct[0].id;
+
+  let imageId;
   if (generatedImageUrl) {
-    await db.insert(images).values({
+    const result = await db.insert(images).values({
       url: generatedImageUrl,
       productId: productId,
       createdAt: new Date(),
-    });
+    }).$returningId();
+    imageId = result[0].id;
   }
 
   if (credits[0] && credits[0].credits) { 
@@ -677,6 +680,7 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
         originalImageUrl: originalImageUrl,
         generatedImageUrl: generatedImageUrl,
       },
+      imageId
     },
     { status: 200 }
   );
