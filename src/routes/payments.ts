@@ -87,7 +87,7 @@ paymentsRoute.post('/webhook', async (c) => {
     const data = await response.json() as { items: { id: string, title: string, unit_price: number, quantity: number }[], preference_id: string };
     console.log("Data: " ,data)
 
-    const credits = data.items[0].unit_price/2;
+    const credits = data.items[0].unit_price;
     const preferenceId = data.preference_id;
 
     const user = await db.select().from(users)
