@@ -56,7 +56,8 @@ paymentsRoute.post("/create-preference", zValidator("json",creditSchema), async 
 
     if (preference && preference.id) {
       await db.update(users).set({
-        lastPreferenceId: preference.id
+        lastPreferenceId: preference.id,
+        lastPreferencePaid: false,
       })
       .where(eq(users.id, (decoded as JwtPayload).id));
     }
@@ -94,9 +95,10 @@ paymentsRoute.post('/webhook', async (c) => {
 
     console.log(user[0])
 
-    if (user[0] && user[0].credits != null) {
+    if (user[0] && user[0].credits != null && !user[0].lastPreferencePaid) {
         await db.update(users).set({
-          credits: user[0].credits + credits
+          credits: user[0].credits + credits,
+          lastPreferencePaid: true,
       }).where(eq(users.lastPreferenceId, preferenceId));
     }
 
