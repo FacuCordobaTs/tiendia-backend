@@ -5,9 +5,9 @@ import { drizzle } from "drizzle-orm/mysql2";
 import { pool } from "../db";
 import { images, products, users } from "../db/schema";
 import { authMiddleware } from "../middlewares/auth.middleware";
-import { eq, sql } from "drizzle-orm";
+import { eq, sql, like, notLike } from "drizzle-orm"; // Added like and notLike
 import UUID from "uuid-js";
-import { readFile, writeFile, unlink } from "fs/promises";
+import { readFile, writeFile, unlink, stat } from "fs/promises"; // Added stat
 import { join } from "path";
 import * as fs from "fs";
 import jwt, {JwtPayload} from "jsonwebtoken";
@@ -740,3 +740,189 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
     { status: 200 }
   );
 })
+
+// --- NUEVO ENDPOINT PARA MIGRAR IMÁGENES LOCALES A R2 ---
+productsRoute.post("/migrate-images", authMiddleware, async (c) => {
+  const db = drizzle(pool);
+  let migratedProductsCount = 0;
+  let migratedImagesCount = 0;
+  let errors: string[] = [];
+
+  // --- Migración de imágenes de productos ---
+  try {
+    console.log("Iniciando migración de imágenes de productos...");
+    // Asumiendo que las URLs locales NO empiezan con el R2_PUBLIC_URL
+    // O que empiezan con '/uploads/' o similar. Ajusta el `like` o `notLike` según sea necesario.
+    const localProducts = await db.select({
+        id: products.id,
+        imageURL: products.imageURL
+      })
+      .from(products)
+      .where(notLike(products.imageURL, `${R2_PUBLIC_URL}/%`)); // Busca URLs que NO sean de R2
+
+    console.log(`Encontrados ${localProducts.length} productos con posibles imágenes locales.`);
+
+    for (const product of localProducts) {
+      if (!product.imageURL || product.imageURL.startsWith('http')) {
+        // Saltar si no hay URL o si ya parece ser una URL completa (podría ser de otro origen)
+        continue;
+      }
+
+      // Asume que la URL local es relativa a UPLOAD_DIR o una ruta específica
+      // ¡¡¡IMPORTANTE!!! Ajusta esta lógica según cómo se guardaban las rutas locales
+      const localPathGuess = join(UPLOAD_DIR, product.imageURL.startsWith('/') ? product.imageURL.substring(1) : product.imageURL);
+
+      try {
+        // Verificar si el archivo local existe
+        await stat(localPathGuess);
+        console.log(`Procesando producto ID ${product.id}, imagen local: ${localPathGuess}`);
+
+        const fileBuffer = await readFile(localPathGuess);
+        const mimeTypeMatch = product.imageURL.match(/\.([^.]+)$/);
+        const fileExtension = mimeTypeMatch ? mimeTypeMatch[1].toLowerCase() : 'png'; // Default a png si no hay extensión
+        let mimeType = `image/${fileExtension === 'jpg' ? 'jpeg' : fileExtension}`;
+        if (!ALLOWED_MIME_TYPES.includes(mimeType)) {
+            mimeType = 'image/png'; // Fallback a un tipo permitido si la extensión no mapea bien
+            console.warn(`Tipo MIME no estándar detectado para ${product.imageURL}, usando ${mimeType}`);
+        }
+
+        const uuid = UUID.create().toString();
+        const r2FileName = `${uuid}.${fileExtension}`;
+
+        const command = new PutObjectCommand({
+          Bucket: R2_BUCKET_NAME!,
+          Key: r2FileName,
+          Body: fileBuffer,
+          ContentType: mimeType,
+        });
+
+        await s3Client.send(command);
+        const newR2Url = `${R2_PUBLIC_URL}/${r2FileName}`;
+
+        // Actualizar la base de datos
+        await db.update(products)
+          .set({ imageURL: newR2Url })
+          .where(eq(products.id, product.id));
+
+        console.log(`Producto ID ${product.id}: Imagen migrada a ${newR2Url}`);
+        migratedProductsCount++;
+
+        // Opcional: Eliminar archivo local después de migrar
+        // try {
+        //   await unlink(localPathGuess);
+        //   console.log(`Archivo local eliminado: ${localPathGuess}`);
+        // } catch (unlinkError) {
+        //   console.error(`Error al eliminar archivo local ${localPathGuess}:`, unlinkError);
+        //   errors.push(`Error eliminando local ${product.imageURL}`);
+        // }
+
+      } catch (error: any) {
+        if (error.code === 'ENOENT') {
+          console.warn(`Archivo local no encontrado para producto ID ${product.id}: ${localPathGuess}. Saltando.`);
+        } else {
+          console.error(`Error migrando imagen para producto ID ${product.id} (${product.imageURL}):`, error);
+          errors.push(`Error producto ${product.id}: ${product.imageURL}`);
+        }
+      }
+    }
+    console.log("Migración de imágenes de productos completada.");
+
+  } catch (error) {
+    console.error("Error durante la migración de imágenes de productos:", error);
+    errors.push("Error general en migración de productos");
+  }
+
+  // --- Migración de imágenes generadas (tabla 'images') ---
+  try {
+    console.log("Iniciando migración de imágenes generadas...");
+    const localGeneratedImages = await db.select({
+        id: images.id,
+        url: images.url
+      })
+      .from(images)
+      .where(notLike(images.url, `${R2_PUBLIC_URL}/%`)); // Busca URLs que NO sean de R2
+
+    console.log(`Encontradas ${localGeneratedImages.length} imágenes generadas con posibles rutas locales.`);
+
+    for (const image of localGeneratedImages) {
+      if (!image.url || image.url.startsWith('http')) {
+        continue;
+      }
+
+      // Asume la misma lógica de ruta local que para productos
+      const localPathGuess = join(UPLOAD_DIR, image.url.startsWith('/') ? image.url.substring(1) : image.url);
+
+      try {
+        await stat(localPathGuess);
+        console.log(`Procesando imagen generada ID ${image.id}, ruta local: ${localPathGuess}`);
+
+        const fileBuffer = await readFile(localPathGuess);
+        const mimeTypeMatch = image.url.match(/\.([^.]+)$/);
+        const fileExtension = mimeTypeMatch ? mimeTypeMatch[1].toLowerCase() : 'png';
+        let mimeType = `image/${fileExtension === 'jpg' ? 'jpeg' : fileExtension}`;
+        if (!ALLOWED_MIME_TYPES.includes(mimeType)) {
+            mimeType = 'image/png';
+            console.warn(`Tipo MIME no estándar detectado para ${image.url}, usando ${mimeType}`);
+        }
+
+        const uuid = UUID.create().toString();
+        const r2FileName = `${uuid}.${fileExtension}`;
+
+        const command = new PutObjectCommand({
+          Bucket: R2_BUCKET_NAME!,
+          Key: r2FileName,
+          Body: fileBuffer,
+          ContentType: mimeType,
+        });
+
+        await s3Client.send(command);
+        const newR2Url = `${R2_PUBLIC_URL}/${r2FileName}`;
+
+        await db.update(images)
+          .set({ url: newR2Url })
+          .where(eq(images.id, image.id));
+
+        console.log(`Imagen generada ID ${image.id}: Migrada a ${newR2Url}`);
+        migratedImagesCount++;
+
+        // Opcional: Eliminar archivo local
+        // try {
+        //   await unlink(localPathGuess);
+        //   console.log(`Archivo local eliminado: ${localPathGuess}`);
+        // } catch (unlinkError) {
+        //   console.error(`Error al eliminar archivo local ${localPathGuess}:`, unlinkError);
+        //   errors.push(`Error eliminando local ${image.url}`);
+        // }
+
+      } catch (error: any) {
+        if (error.code === 'ENOENT') {
+          console.warn(`Archivo local no encontrado para imagen ID ${image.id}: ${localPathGuess}. Saltando.`);
+        } else {
+          console.error(`Error migrando imagen generada ID ${image.id} (${image.url}):`, error);
+          errors.push(`Error imagen ${image.id}: ${image.url}`);
+        }
+      }
+    }
+    console.log("Migración de imágenes generadas completada.");
+
+  } catch (error) {
+    console.error("Error durante la migración de imágenes generadas:", error);
+    errors.push("Error general en migración de imágenes generadas");
+  }
+
+  // --- Respuesta final ---
+  const summary = `Migración completada. Productos migrados: ${migratedProductsCount}. Imágenes generadas migradas: ${migratedImagesCount}. Errores: ${errors.length}`;
+  console.log(summary);
+  if (errors.length > 0) {
+    console.error("Errores detallados:", errors);
+  }
+
+  return c.json({
+    message: summary,
+    migratedProducts: migratedProductsCount,
+    migratedGeneratedImages: migratedImagesCount,
+    errors: errors,
+  });
+});
+
+export default productsRoute;
