@@ -47,7 +47,7 @@ const generateProductSchema = z.object({
   includeModel: z.boolean().optional().default(false),
 });
 
-const UPLOAD_DIR = join(process.cwd(), "public", "uploads");
+const UPLOAD_DIR = join(process.cwd(), "public");
 
 async function saveImage(base64String: string): Promise<string> {
   const match = base64String.match(/^data:(image\/\w+);base64,/);
