@@ -13,10 +13,34 @@ import * as fs from "fs";
 import jwt, {JwtPayload} from "jsonwebtoken";
 import { getCookie } from "hono/cookie";
 import { GeminiRequestQueue } from "../libs/GeminiRequestQueue";
+import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { Buffer } from 'buffer'; // Importa Buffer explícitamente si es necesario en tu entorno
 
-
+// --- Constantes (mantienes las de validación) ---
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
 const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
+// --- Configuración del Cliente S3 (asegúrate que las variables de entorno estén cargadas) ---
+const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
+const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
+const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
+const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME;
+const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL?.replace(/\/$/, ''); // Asegura que no termine con /
+
+if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET_NAME || !R2_PUBLIC_URL) {
+  console.error("FATAL ERROR: Faltan variables de entorno de Cloudflare R2. La aplicación no puede manejar imágenes.");
+  // En un escenario real, podrías querer detener la app o manejar esto más elegantemente
+  process.exit(1);
+}
+
+const s3Client = new S3Client({
+  region: "auto",
+  endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  credentials: {
+    accessKeyId: R2_ACCESS_KEY_ID,
+    secretAccessKey: R2_SECRET_ACCESS_KEY,
+  },
+});
 
 const generateProductSchema = z.object({
   image: z.string().min(10),
@@ -26,42 +50,68 @@ const generateProductSchema = z.object({
 const UPLOAD_DIR = join(process.cwd(), "public", "uploads");
 
 async function saveImage(base64String: string): Promise<string> {
+  const match = base64String.match(/^data:(image\/\w+);base64,/);
+  if (!match) {
+      throw new Error('Formato de base64 inválido para saveImage');
+  }
+  const mimeType = match[1];
+  const fileExtension = mimeType.split('/')[1] || 'png'; // Extrae extensión
+
   const base64Data = base64String.replace(/^data:image\/\w+;base64,/, "");
   const buffer = Buffer.from(base64Data, "base64");
 
   const uuid = UUID.create().toString();
-  const fileName = `${uuid}.png`;
-  const filePath = join(UPLOAD_DIR, fileName);
+  const fileName = `${uuid}.${fileExtension}`; // Nombre del objeto en R2
 
-  await writeFile(filePath, buffer);
-  return `/uploads/${fileName}`;
-}
+  const command = new PutObjectCommand({
+    Bucket: R2_BUCKET_NAME,
+    Key: fileName,
+    Body: buffer,
+    ContentType: mimeType,
+  });
 
-async function deleteImage(imageUrl: string): Promise<void> {
   try {
-    const fileName = imageUrl.split("/").pop();
-    if (!fileName) {
-      console.warn("URL de imagen inválida:", imageUrl);
-      return;
-    }
-
-    const filePath = join(UPLOAD_DIR, fileName);
-    await unlink(filePath);
-  } catch (error: any) {
-    if (error.code === "ENOENT") {
-      console.warn("Imagen no encontrada:", imageUrl);
-    } else {
-      console.error("Error al eliminar la imagen:", error);
-    }
+    await s3Client.send(command);
+    const publicUrl = `${R2_PUBLIC_URL}/${fileName}`; // Construye la URL pública completa
+    console.log(`Imagen guardada en R2: ${publicUrl}`);
+    return publicUrl;
+  } catch (error) {
+    console.error(`Error al subir ${fileName} a R2:`, error);
+    throw new Error("Error al guardar la imagen en el almacenamiento en la nube.");
   }
 }
 
-const productSchema = z.object({
-  name: z.string().min(3).max(255),
-  price: z.number().min(1),
-  image: z.string().optional(),
-  id: z.number(),
-});
+async function deleteImage(imageUrl: string): Promise<void> {
+  // Verifica si es una URL de R2 gestionada por esta app
+  if (!imageUrl || !imageUrl.startsWith(R2_PUBLIC_URL!)) {
+    console.warn("deleteImage: URL inválida o no pertenece a R2 gestionado:", imageUrl);
+    return;
+  }
+  try {
+    const urlObject = new URL(imageUrl);
+    const key = urlObject.pathname.substring(1); // Extrae la 'Key' (path sin / inicial)
+
+    if (!key) {
+      console.warn("deleteImage: No se pudo extraer la clave de la URL R2:", imageUrl);
+      return;
+    }
+
+    const command = new DeleteObjectCommand({
+      Bucket: R2_BUCKET_NAME,
+      Key: key,
+    });
+
+    console.log(`Eliminando objeto ${key} de R2 bucket ${R2_BUCKET_NAME}...`);
+    await s3Client.send(command);
+    console.log(`Objeto ${key} eliminado de R2.`);
+
+  } catch (error: any) {
+     // Es común que S3 devuelva un error si el objeto ya no existe, podríamos querer ignorarlo.
+     // Revisar el tipo de error si es necesario (ej. error.name === 'NoSuchKey')
+     console.error(`Error al eliminar objeto de R2 (${imageUrl}):`, error);
+     // No relanzar para permitir que la lógica de la BD continúe si es deseado.
+  }
+}
 
 const updateProductSchema = z.object({
   name: z.string().min(3).max(255),
@@ -236,6 +286,7 @@ export const productsRoute = new Hono()
           { status: 400 } // Usa init object
         );
       }
+      const originalProductImageUrl = product.imageURL
 
       // 3. Leer imagen original y convertir a Base64
       const originalImageName = product.imageURL.split("/").pop();
@@ -243,29 +294,39 @@ export const productsRoute = new Hono()
          console.error("No se pudo extraer el nombre de archivo de:", product.imageURL);
          return c.json({ message: "Error al procesar la URL de la imagen original." }, { status: 500 });
        }
-      const originalImagePath = join(UPLOAD_DIR, originalImageName);
+      
       let originalImageBase64: string;
       let originalMimeType: string;
-
+ 
       try {
-        const imageData = await readFile(originalImagePath); // Ahora debería encontrar readFile
-        originalImageBase64 = imageData.toString("base64");
-        const extension = originalImageName.split(".").pop()?.toLowerCase();
-        if (extension === "jpg" || extension === "jpeg") originalMimeType = "image/jpeg";
-        else if (extension === "png") originalMimeType = "image/png";
-        else if (extension === "webp") originalMimeType = "image/webp";
-        else {
-           console.warn(`Tipo MIME desconocido para ${originalImageName}, usando image/jpeg.`);
-           originalMimeType = "image/jpeg";
+        console.log(`Descargando imagen original desde R2: ${originalProductImageUrl}`);
+        const response = await fetch(originalProductImageUrl); // Usar fetch global
+        if (!response.ok) {
+            throw new Error(`Error HTTP ${response.status} al descargar imagen de R2`);
         }
-      } catch (readError: any) {
-        if (readError.code === 'ENOENT') {
-             console.error("Archivo de imagen original no encontrado en:", originalImagePath);
-             return c.json({ message: "Archivo de imagen original no encontrado." }, { status: 404 });
+        const contentTypeHeader = response.headers.get("content-type");
+
+        // Determinar MimeType (priorizar header, luego extensión URL)
+        if (contentTypeHeader && ALLOWED_MIME_TYPES.includes(contentTypeHeader)) {
+            originalMimeType = contentTypeHeader;
+        } else {
+            const urlPath = new URL(originalProductImageUrl).pathname;
+            const extension = urlPath.split('.').pop()?.toLowerCase();
+            if (extension === "jpg" || extension === "jpeg") originalMimeType = "image/jpeg";
+            else if (extension === "png") originalMimeType = "image/png";
+            else if (extension === "webp") originalMimeType = "image/webp";
+            else { throw new Error("Tipo MIME desconocido o no permitido para la imagen original."); }
+            console.warn(`Usando MimeType ${originalMimeType} basado en extensión para ${originalProductImageUrl}`);
         }
-        console.error("Error al leer la imagen original:", readError);
-        return c.json({ message: "Error al leer la imagen original del producto." }, { status: 500 });
-      }
+
+        const imageBuffer = await response.arrayBuffer();
+        originalImageBase64 = Buffer.from(imageBuffer).toString("base64");
+        console.log(`Imagen original descargada de R2 y convertida a Base64 (${(originalImageBase64.length * 3/4 / 1024).toFixed(2)} KB)`);
+
+    } catch (fetchError: any) {
+        console.error(`Error al obtener/procesar la imagen original desde R2 (${originalProductImageUrl}):`, fetchError);
+        return c.json({ message: "Error crítico al acceder a la imagen original del producto." }, { status: 500 });
+    }
 
       // 4. Enviar datos al Worker a través de la cola
       console.log(`Enviando solicitud al worker para el producto ID: ${id}`);
@@ -278,20 +339,6 @@ export const productsRoute = new Hono()
       // Usar la cola para gestionar la solicitud
       const workerResponse = await requestQueue.enqueue(workerPayload, workerUrl);
       console.log(`Respuesta del worker recibida correctamente`);
-
-      type WorkerResponse = {
-        geminiData: {
-          candidates: Array<{
-            content: {
-              parts: Array<{
-                inlineData: {
-                  data: string;
-                };
-              }>;
-            };
-          }>;
-        };
-      };
 
       try {
         const adImageUrl = await saveImage(`data:image/png;base64,${workerResponse.geminiData.candidates[0].content.parts[0].inlineData.data}`); // <--- Ahora es seguro
@@ -456,6 +503,7 @@ productsRoute.post("/images/modify/:imageId", authMiddleware, zValidator("json",
     if (!imageResult || imageResult.length === 0 || !originalImage || !originalImage.imageUrl) {
         return c.json({ message: "La imagen original no tiene URL" }, 400);
     }
+    const originalImageUrl = originalImage.imageUrl; // URL de R2
 
     // 3. Leer imagen original y convertir a Base64
     const originalImageName = originalImage.imageUrl.split("/").pop();
@@ -463,29 +511,35 @@ productsRoute.post("/images/modify/:imageId", authMiddleware, zValidator("json",
       console.error("No se pudo extraer el nombre de archivo de:", originalImage.imageUrl);
       return c.json({ message: "Error al procesar la URL de la imagen original." }, { status: 500 });
     }
-    const originalImagePath = join(UPLOAD_DIR, originalImageName);
+    
     let originalImageBase64: string;
     let originalMimeType: string;
 
     try {
-      const imageData = await readFile(originalImagePath);
-      originalImageBase64 = imageData.toString("base64");
-      const extension = originalImageName.split(".").pop()?.toLowerCase();
-      if (extension === "jpg" || extension === "jpeg") originalMimeType = "image/jpeg";
-      else if (extension === "png") originalMimeType = "image/png";
-      else if (extension === "webp") originalMimeType = "image/webp";
-      else {
-        console.warn(`Tipo MIME desconocido para ${originalImageName}, usando image/jpeg.`);
-        originalMimeType = "image/jpeg";
-      }
-    } catch (readError: any) {
-      if (readError.code === 'ENOENT') {
-        console.error("Archivo de imagen original no encontrado en:", originalImagePath);
-        return c.json({ message: "Archivo de imagen original no encontrado." }, { status: 404 });
-      }
-      console.error("Error al leer la imagen original:", readError);
-      return c.json({ message: "Error al leer la imagen original." }, { status: 500 });
-    }
+      console.log(`Descargando imagen a modificar desde R2: ${originalImageUrl}`);
+      const response = await fetch(originalImageUrl);
+      if (!response.ok) { throw new Error(`Error HTTP ${response.status} al descargar imagen de R2`); }
+      const contentTypeHeader = response.headers.get("content-type");
+      // ... (Lógica para determinar originalMimeType igual que en /generate-ad) ...
+       if (contentTypeHeader && ALLOWED_MIME_TYPES.includes(contentTypeHeader)) {
+           originalMimeType = contentTypeHeader;
+       } else {
+          const urlPath = new URL(originalImageUrl).pathname;
+          const extension = urlPath.split('.').pop()?.toLowerCase();
+          if (extension === "jpg" || extension === "jpeg") originalMimeType = "image/jpeg";
+          else if (extension === "png") originalMimeType = "image/png";
+          else if (extension === "webp") originalMimeType = "image/webp";
+          else { throw new Error("Tipo MIME desconocido o no permitido para la imagen original."); }
+           console.warn(`Usando MimeType ${originalMimeType} basado en extensión para ${originalImageUrl}`);
+       }
+
+      const imageBuffer = await response.arrayBuffer();
+      originalImageBase64 = Buffer.from(imageBuffer).toString("base64");
+      console.log(`Imagen a modificar descargada de R2 y convertida a Base64.`);
+  } catch (fetchError: any) {
+      console.error(`Error al obtener/procesar la imagen a modificar desde R2 (${originalImageUrl}):`, fetchError);
+      return c.json({ message: "Error crítico al acceder a la imagen a modificar." }, { status: 500 });
+  }
 
     // 4. Enviar datos al Worker para modificación
     console.log(`Enviando solicitud de modificación al worker para imagen ID: ${imageId}`);
