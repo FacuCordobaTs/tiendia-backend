@@ -29,7 +29,6 @@ const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL?.replace(/\/$/, ''); // Asegura 
 
 if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET_NAME || !R2_PUBLIC_URL) {
   console.error("FATAL ERROR: Faltan variables de entorno de Cloudflare R2. La aplicación no puede manejar imágenes.");
-  // En un escenario real, podrías querer detener la app o manejar esto más elegantemente
   process.exit(1);
 }
 
@@ -82,7 +81,6 @@ async function saveImage(base64String: string): Promise<string> {
 }
 
 async function deleteImage(imageUrl: string): Promise<void> {
-  // Verifica si es una URL de R2 gestionada por esta app
   if (!imageUrl || !imageUrl.startsWith(R2_PUBLIC_URL!)) {
     console.warn("deleteImage: URL inválida o no pertenece a R2 gestionado:", imageUrl);
     return;
@@ -106,10 +104,7 @@ async function deleteImage(imageUrl: string): Promise<void> {
     console.log(`Objeto ${key} eliminado de R2.`);
 
   } catch (error: any) {
-     // Es común que S3 devuelva un error si el objeto ya no existe, podríamos querer ignorarlo.
-     // Revisar el tipo de error si es necesario (ej. error.name === 'NoSuchKey')
      console.error(`Error al eliminar objeto de R2 (${imageUrl}):`, error);
-     // No relanzar para permitir que la lógica de la BD continúe si es deseado.
   }
 }
 
@@ -179,16 +174,15 @@ export const productsRoute = new Hono()
         await deleteImage(product[0].imageURL);
       }
 
-      // Eliminar todas las imágenes asociadas al producto
       const associatedImages = await db.select().from(images).where(eq(images.productId, id));
 
       for (const image of associatedImages) {
         if (image.url) {
-          await deleteImage(image.url); // Eliminar archivo físico
+          await deleteImage(image.url);
         }
       }
 
-      await db.delete(images).where(eq(images.productId, id)); // Eliminar registros de la base de datos
+      await db.delete(images).where(eq(images.productId, id));
       await db.delete(products).where(eq(products.id, id));
 
       return c.json({ message: "Producto eliminado correctamente" }, 200);
@@ -216,7 +210,6 @@ export const productsRoute = new Hono()
         return c.json({ message: "No hay productos registrados" }, 404);
       }
 
-
       return c.json({ products: productsListed }, 200);
     } catch (error) {
       return c.json({ message: "Error al obtener los productos" }, 400);
@@ -239,7 +232,6 @@ export const productsRoute = new Hono()
 
   const userId = (decoded as JwtPayload).id
 
-
     const credits = await db.select({
       credits: users.credits,
     })
@@ -250,7 +242,7 @@ export const productsRoute = new Hono()
       return c.json({ message: "Creditos no suficientes" }, { status: 400 });
     }
     if (isNaN(id)) {
-      return c.json({ error: "ID de producto inválido" }, { status: 400 }); // Usa init object
+      return c.json({ error: "ID de producto inválido" }, { status: 400 });
     }
 
     let includeModel = true;
@@ -265,7 +257,6 @@ export const productsRoute = new Hono()
     }
 
     try {
-      // 1. Buscar el producto
       const productResult = await db
         .select({
           imageURL: products.imageURL,
@@ -275,20 +266,18 @@ export const productsRoute = new Hono()
         .limit(1);
 
       if (!productResult || productResult.length === 0) {
-        return c.json({ message: "Producto no encontrado" }, { status: 404 }); // Usa init object
+        return c.json({ message: "Producto no encontrado" }, { status: 404 });
       }
       const product = productResult[0];
 
-      // 2. Verificar imagen original
       if (!product.imageURL) {
         return c.json(
           { message: "El producto no tiene una imagen para generar publicidad." },
-          { status: 400 } // Usa init object
+          { status: 400 }
         );
       }
       const originalProductImageUrl = product.imageURL
 
-      // 3. Leer imagen original y convertir a Base64
       const originalImageName = product.imageURL.split("/").pop();
        if (!originalImageName) {
          console.error("No se pudo extraer el nombre de archivo de:", product.imageURL);
@@ -300,13 +289,12 @@ export const productsRoute = new Hono()
  
       try {
         console.log(`Descargando imagen original desde R2: ${originalProductImageUrl}`);
-        const response = await fetch(originalProductImageUrl); // Usar fetch global
+        const response = await fetch(originalProductImageUrl);
         if (!response.ok) {
             throw new Error(`Error HTTP ${response.status} al descargar imagen de R2`);
         }
         const contentTypeHeader = response.headers.get("content-type");
 
-        // Determinar MimeType (priorizar header, luego extensión URL)
         if (contentTypeHeader && ALLOWED_MIME_TYPES.includes(contentTypeHeader)) {
             originalMimeType = contentTypeHeader;
         } else {
@@ -328,7 +316,6 @@ export const productsRoute = new Hono()
         return c.json({ message: "Error crítico al acceder a la imagen original del producto." }, { status: 500 });
     }
 
-      // 4. Enviar datos al Worker a través de la cola
       console.log(`Enviando solicitud al worker para el producto ID: ${id}`);
       const workerPayload = {
         imageBase64: originalImageBase64,
@@ -336,21 +323,19 @@ export const productsRoute = new Hono()
         includeModel: includeModel,
       };
 
-      // Usar la cola para gestionar la solicitud
       const workerResponse = await requestQueue.enqueue(workerPayload, workerUrl);
       console.log(`Respuesta del worker recibida correctamente`);
 
       try {
-        const adImageUrl = await saveImage(`data:image/png;base64,${workerResponse.geminiData.candidates[0].content.parts[0].inlineData.data}`); // <--- Ahora es seguro
+        const adImageUrl = await saveImage(`data:image/png;base64,${workerResponse.geminiData.candidates[0].content.parts[0].inlineData.data}`);
 
         const result = await db.insert(images).values({
-          url: adImageUrl,      // La URL relativa guardada localmente
-          productId: id,         // El ID del producto para el que se generó
-          createdAt: new Date(), // Fecha de creación
+          url: adImageUrl,
+          productId: id,
+          createdAt: new Date(),
         })
         .$returningId()
         console.log(`Registro insertado en tabla 'images' para producto ${id}, URL: ${adImageUrl}`);
-
 
         if (credits[0] && credits[0].credits) { 
           await db.update(users).set({
@@ -375,7 +360,7 @@ export const productsRoute = new Hono()
     } catch (error: any) {
       console.error("Error en la ruta /generate-ad:", error);
       const errorMessage = error.message || "Error interno del servidor al generar la publicidad.";
-      return c.json({ message: errorMessage }, { status: 500 }); // <- Usa también el objeto init aquí
+      return c.json({ message: errorMessage }, { status: 500 });
     }
   })
   .get("/images/by-user/:userId", authMiddleware, async (c) => {
@@ -392,14 +377,13 @@ export const productsRoute = new Hono()
             imageId: images.id,
             imageUrl: images.url,
             productId: images.productId,
-            productName: products.name, // Opcional: incluir el nombre del producto
+            productName: products.name,
             createdAt: images.createdAt,
         })
         .from(images)
         .innerJoin(products, eq(images.productId, products.id))
-        .where(eq(products.createdById, userId)); // Compara con el ID numérico del usuario
+        .where(eq(products.createdById, userId));
 
-        // Devuelve las imágenes encontradas (puede ser un array vacío)
         return c.json({ images: userImages }, 200);
 
     } catch (error: any) {
@@ -412,18 +396,16 @@ export const productsRoute = new Hono()
   const imageIdParam = c.req.param("imageId");
   const imageId = Number(imageIdParam);
 
-
   if (isNaN(imageId)) {
       return c.json({ error: "ID de imagen inválido" }, 400);
   }
 
   try {
-      // 1. Buscar la imagen y verificar la propiedad a través del producto
-          const imageResult = await db.select({
-              imageUrl: images.url,
-          })
-          .from(images)
-          .where(eq(images.id, imageId))
+      const imageResult = await db.select({
+          imageUrl: images.url,
+      })
+      .from(images)
+      .where(eq(images.id, imageId))
       if (!imageResult || imageResult.length === 0) {
           return c.json({ message: "Imagen no encontrada" }, 404);
       }
@@ -431,14 +413,12 @@ export const productsRoute = new Hono()
       const imageToDelete = imageResult[0];
 
       if (imageToDelete.imageUrl) {
-           await deleteImage(imageToDelete.imageUrl); // Usa tu función existente
+           await deleteImage(imageToDelete.imageUrl);
            console.log(`Archivo físico ${imageToDelete.imageUrl} marcado para eliminación (o eliminado).`);
       } else {
            console.warn(`La imagen ${imageId} no tenía URL registrada para eliminar archivo.`);
       }
 
-
-      // 4. Eliminar el registro de la base de datos
       await db.delete(images).where(eq(images.id, imageId));
       console.log(`Registro de imagen ${imageId} eliminado de la base de datos.`);
 
@@ -450,7 +430,6 @@ export const productsRoute = new Hono()
   }
 })
 
-// NUEVO ENDPOINT PARA MODIFICAR IMAGEN
 productsRoute.post("/images/modify/:imageId", authMiddleware, zValidator("json", z.object({ prompt: z.string().min(1) })), async (c) => {
   const db = drizzle(pool);
   const imageIdParam = c.req.param("imageId");
@@ -480,14 +459,12 @@ productsRoute.post("/images/modify/:imageId", authMiddleware, zValidator("json",
   }
 
   try {
-    // 1. Verificar créditos
     const creditsResult = await db.select({ credits: users.credits }).from(users).where(eq(users.id, userId));
     const currentCredits = creditsResult[0]?.credits ?? 0;
-    if (currentCredits < 50) { // Asumiendo que modificar cuesta 50 créditos
+    if (currentCredits < 50) {
       return c.json({ message: "Créditos insuficientes" }, { status: 400 });
     }
 
-    // 2. Buscar la imagen original y su producto asociado
     const imageResult = await db.select({
         imageUrl: images.url,
         productId: images.productId
@@ -503,9 +480,8 @@ productsRoute.post("/images/modify/:imageId", authMiddleware, zValidator("json",
     if (!imageResult || imageResult.length === 0 || !originalImage || !originalImage.imageUrl) {
         return c.json({ message: "La imagen original no tiene URL" }, 400);
     }
-    const originalImageUrl = originalImage.imageUrl; // URL de R2
+    const originalImageUrl = originalImage.imageUrl;
 
-    // 3. Leer imagen original y convertir a Base64
     const originalImageName = originalImage.imageUrl.split("/").pop();
     if (!originalImageName) {
       console.error("No se pudo extraer el nombre de archivo de:", originalImage.imageUrl);
@@ -520,7 +496,6 @@ productsRoute.post("/images/modify/:imageId", authMiddleware, zValidator("json",
       const response = await fetch(originalImageUrl);
       if (!response.ok) { throw new Error(`Error HTTP ${response.status} al descargar imagen de R2`); }
       const contentTypeHeader = response.headers.get("content-type");
-      // ... (Lógica para determinar originalMimeType igual que en /generate-ad) ...
        if (contentTypeHeader && ALLOWED_MIME_TYPES.includes(contentTypeHeader)) {
            originalMimeType = contentTypeHeader;
        } else {
@@ -541,20 +516,17 @@ productsRoute.post("/images/modify/:imageId", authMiddleware, zValidator("json",
       return c.json({ message: "Error crítico al acceder a la imagen a modificar." }, { status: 500 });
   }
 
-    // 4. Enviar datos al Worker para modificación
     console.log(`Enviando solicitud de modificación al worker para imagen ID: ${imageId}`);
     const workerPayload = {
-      task: 'modify_image', // Nueva tarea para el worker
+      task: 'modify_image',
       imageBase64: originalImageBase64,
       mimeType: originalMimeType,
-      prompt: prompt, // Instrucciones del usuario
+      prompt: prompt,
     };
 
-    // Usar la cola para gestionar la solicitud
     const workerResponse = await requestQueue.enqueue(workerPayload, workerUrl);
     console.log(`Respuesta de modificación del worker recibida`);
 
-    // 5. Procesar respuesta del worker y guardar nueva imagen
     const modifiedImageData = workerResponse.geminiData?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
 
     if (!modifiedImageData) {
@@ -567,15 +539,13 @@ productsRoute.post("/images/modify/:imageId", authMiddleware, zValidator("json",
       modifiedImageUrl = await saveImage(`data:image/png;base64,${modifiedImageData}`);
       console.log("Imagen modificada guardada en:", modifiedImageUrl);
 
-      // 6. Insertar registro de la nueva imagen en la BD (asociada al mismo producto)
       const result = await db.insert(images).values({
         url: modifiedImageUrl,
-        productId: originalImage.productId, // Asociar al producto original
+        productId: originalImage.productId,
         createdAt: new Date(),
       }).$returningId();
       console.log(`Registro insertado en tabla 'images' para imagen modificada, URL: ${modifiedImageUrl}`);
 
-      // 7. Deducir créditos
       await db.update(users).set({
         credits: currentCredits - 50,
       })
@@ -591,7 +561,6 @@ productsRoute.post("/images/modify/:imageId", authMiddleware, zValidator("json",
       );
     } catch (saveError: any) {
       console.error("Error al guardar la imagen modificada:", saveError);
-      // Intentar eliminar el archivo si se creó pero falló la inserción en BD
       if (modifiedImageUrl!) {
         try { await deleteImage(modifiedImageUrl!); } catch (delErr) { console.error("Error al intentar limpiar imagen guardada tras fallo:", delErr); }
       }
@@ -658,12 +627,11 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
 
   console.log("Llamando al worker para generar nombre...");
   const nameWorkerPayload = {
-    task: 'generate_name', // Indicador de tarea
+    task: 'generate_name',
     imageBase64: data,
     mimeType: mimeType,
   };
 
-  // Usar la cola para la solicitud de nombre
   try {
     const nameResult = await requestQueue.enqueue(nameWorkerPayload, workerUrl);
     if (nameResult.generatedName) {
@@ -674,7 +642,6 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
     }
   } catch (error) {
     console.error("Error del worker (generando nombre):", error);
-    // Continuar con el nombre predeterminado
   }
   
   console.log(`Llamando al worker para generar imagen (includeModel: ${includeModel})...`);
@@ -685,21 +652,22 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
     includeModel: includeModel,
   };
 
-  // Usar la cola para la solicitud de imagen
   try {
     const imageResult = await requestQueue.enqueue(imageWorkerPayload, workerUrl);
-    const generatedImageData = imageResult.geminiData?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+    const imagePart = imageResult.geminiData?.candidates?.[0]?.content?.parts?.find((part: { inlineData: any; }) => part.inlineData);
 
-    if (generatedImageData) {
-      generatedImageUrl = await saveImage(`data:image/png;base64,${generatedImageData}`);
+    if (imagePart?.inlineData) {
+      const generatedImageData = imagePart.inlineData.data;
+      const mimeType = imagePart.inlineData.mimeType || "image/png";
+      generatedImageUrl = await saveImage(`data:${mimeType};base64,${generatedImageData}`);
       console.log("Imagen generada guardada en:", generatedImageUrl);
     } else {
-      console.warn("Worker no devolvió imagen generada:", imageResult);
+      console.warn("No se encontró inlineData en la respuesta del worker:", imageResult);
     }
   } catch (error) {
     console.error("Error del worker (generando imagen):", error);
-    // Continuar sin imagen generada
   }
+
   const insertedProduct = await db.insert(products).values({
     name: productName,
     imageURL: originalImageUrl,
@@ -741,48 +709,40 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
   );
 })
 
-// --- NUEVO ENDPOINT PARA MIGRAR IMÁGENES LOCALES A R2 ---
 productsRoute.post("/migrate-images", authMiddleware, async (c) => {
   const db = drizzle(pool);
   let migratedProductsCount = 0;
   let migratedImagesCount = 0;
   let errors: string[] = [];
 
-  // --- Migración de imágenes de productos ---
   try {
     console.log("Iniciando migración de imágenes de productos...");
-    // Asumiendo que las URLs locales NO empiezan con el R2_PUBLIC_URL
-    // O que empiezan con '/uploads/' o similar. Ajusta el `like` o `notLike` según sea necesario.
     const localProducts = await db.select({
         id: products.id,
         imageURL: products.imageURL
       })
       .from(products)
-      .where(notLike(products.imageURL, `${R2_PUBLIC_URL}/%`)); // Busca URLs que NO sean de R2
+      .where(notLike(products.imageURL, `${R2_PUBLIC_URL}/%`));
 
     console.log(`Encontrados ${localProducts.length} productos con posibles imágenes locales.`);
 
     for (const product of localProducts) {
       if (!product.imageURL || product.imageURL.startsWith('http')) {
-        // Saltar si no hay URL o si ya parece ser una URL completa (podría ser de otro origen)
         continue;
       }
 
-      // Asume que la URL local es relativa a UPLOAD_DIR o una ruta específica
-      // ¡¡¡IMPORTANTE!!! Ajusta esta lógica según cómo se guardaban las rutas locales
       const localPathGuess = join(UPLOAD_DIR, product.imageURL.startsWith('/') ? product.imageURL.substring(1) : product.imageURL);
 
       try {
-        // Verificar si el archivo local existe
         await stat(localPathGuess);
         console.log(`Procesando producto ID ${product.id}, imagen local: ${localPathGuess}`);
 
         const fileBuffer = await readFile(localPathGuess);
         const mimeTypeMatch = product.imageURL.match(/\.([^.]+)$/);
-        const fileExtension = mimeTypeMatch ? mimeTypeMatch[1].toLowerCase() : 'png'; // Default a png si no hay extensión
+        const fileExtension = mimeTypeMatch ? mimeTypeMatch[1].toLowerCase() : 'png';
         let mimeType = `image/${fileExtension === 'jpg' ? 'jpeg' : fileExtension}`;
         if (!ALLOWED_MIME_TYPES.includes(mimeType)) {
-            mimeType = 'image/png'; // Fallback a un tipo permitido si la extensión no mapea bien
+            mimeType = 'image/png';
             console.warn(`Tipo MIME no estándar detectado para ${product.imageURL}, usando ${mimeType}`);
         }
 
@@ -799,22 +759,12 @@ productsRoute.post("/migrate-images", authMiddleware, async (c) => {
         await s3Client.send(command);
         const newR2Url = `${R2_PUBLIC_URL}/${r2FileName}`;
 
-        // Actualizar la base de datos
         await db.update(products)
           .set({ imageURL: newR2Url })
           .where(eq(products.id, product.id));
 
         console.log(`Producto ID ${product.id}: Imagen migrada a ${newR2Url}`);
         migratedProductsCount++;
-
-        // Opcional: Eliminar archivo local después de migrar
-        // try {
-        //   await unlink(localPathGuess);
-        //   console.log(`Archivo local eliminado: ${localPathGuess}`);
-        // } catch (unlinkError) {
-        //   console.error(`Error al eliminar archivo local ${localPathGuess}:`, unlinkError);
-        //   errors.push(`Error eliminando local ${product.imageURL}`);
-        // }
 
       } catch (error: any) {
         if (error.code === 'ENOENT') {
@@ -832,7 +782,6 @@ productsRoute.post("/migrate-images", authMiddleware, async (c) => {
     errors.push("Error general en migración de productos");
   }
 
-  // --- Migración de imágenes generadas (tabla 'images') ---
   try {
     console.log("Iniciando migración de imágenes generadas...");
     const localGeneratedImages = await db.select({
@@ -840,7 +789,7 @@ productsRoute.post("/migrate-images", authMiddleware, async (c) => {
         url: images.url
       })
       .from(images)
-      .where(notLike(images.url, `${R2_PUBLIC_URL}/%`)); // Busca URLs que NO sean de R2
+      .where(notLike(images.url, `${R2_PUBLIC_URL}/%`));
 
     console.log(`Encontradas ${localGeneratedImages.length} imágenes generadas con posibles rutas locales.`);
 
@@ -849,7 +798,6 @@ productsRoute.post("/migrate-images", authMiddleware, async (c) => {
         continue;
       }
 
-      // Asume la misma lógica de ruta local que para productos
       const localPathGuess = join(UPLOAD_DIR, image.url.startsWith('/') ? image.url.substring(1) : image.url);
 
       try {
@@ -885,15 +833,6 @@ productsRoute.post("/migrate-images", authMiddleware, async (c) => {
         console.log(`Imagen generada ID ${image.id}: Migrada a ${newR2Url}`);
         migratedImagesCount++;
 
-        // Opcional: Eliminar archivo local
-        // try {
-        //   await unlink(localPathGuess);
-        //   console.log(`Archivo local eliminado: ${localPathGuess}`);
-        // } catch (unlinkError) {
-        //   console.error(`Error al eliminar archivo local ${localPathGuess}:`, unlinkError);
-        //   errors.push(`Error eliminando local ${image.url}`);
-        // }
-
       } catch (error: any) {
         if (error.code === 'ENOENT') {
           console.warn(`Archivo local no encontrado para imagen ID ${image.id}: ${localPathGuess}. Saltando.`);
@@ -910,7 +849,6 @@ productsRoute.post("/migrate-images", authMiddleware, async (c) => {
     errors.push("Error general en migración de imágenes generadas");
   }
 
-  // --- Respuesta final ---
   const summary = `Migración completada. Productos migrados: ${migratedProductsCount}. Imágenes generadas migradas: ${migratedImagesCount}. Errores: ${errors.length}`;
   console.log(summary);
   if (errors.length > 0) {
