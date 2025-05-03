@@ -228,15 +228,15 @@ export const productsRoute = new Hono()
           if (error) reject(error);
           resolve(decoded);
       });
-  });
+    });
 
-  const userId = (decoded as JwtPayload).id
+    const userId = (decoded as JwtPayload).id;
 
     const credits = await db.select({
       credits: users.credits,
     })
     .from(users)
-    .where(eq(users.id, userId))
+    .where(eq(users.id, userId));
 
     if (credits && credits[0] && credits[0].credits && credits[0].credits < 50) {
       return c.json({ message: "Creditos no suficientes" }, { status: 400 });
@@ -276,7 +276,7 @@ export const productsRoute = new Hono()
           { status: 400 }
         );
       }
-      const originalProductImageUrl = product.imageURL
+      const originalProductImageUrl = product.imageURL;
 
       const originalImageName = product.imageURL.split("/").pop();
        if (!originalImageName) {
@@ -326,35 +326,34 @@ export const productsRoute = new Hono()
       const workerResponse = await requestQueue.enqueue(workerPayload, workerUrl);
       console.log(`Respuesta del worker recibida correctamente`);
 
-      try {
-        const adImageUrl = await saveImage(`data:image/png;base64,${workerResponse.geminiData.candidates[0].content.parts[0].inlineData.data}`);
+      const imagePart = workerResponse.geminiData?.candidates?.[0]?.content?.parts?.find((part: { inlineData: any; }) => part.inlineData);
+      if (imagePart?.inlineData) {
+        const generatedImageData = imagePart.inlineData.data;
+        const mimeType = imagePart.inlineData.mimeType || "image/png";
+        const adImageUrl = await saveImage(`data:${mimeType};base64,${generatedImageData}`);
+        console.log("Imagen generada guardada en:", adImageUrl);
 
         const result = await db.insert(images).values({
           url: adImageUrl,
           productId: id,
           createdAt: new Date(),
-        })
-        .$returningId()
+        }).$returningId();
         console.log(`Registro insertado en tabla 'images' para producto ${id}, URL: ${adImageUrl}`);
 
         if (credits[0] && credits[0].credits) { 
           await db.update(users).set({
             credits: credits[0].credits - 50,
-          })
-          .where(eq(users.id, userId))
+          }).where(eq(users.id, userId));
         }
 
-        return c.json(
-          {
-            message: "Publicidad generada correctamente.",
-            adImageUrl: adImageUrl,
-            imageId: result[0].id
-            },
-          { status: 200 } 
-        );
-      } catch (error: any) {
-        console.error("Error al guardar la imagen generada:", error);
-        return c.json({ message: "Error al guardar la imagen generada por el worker." }, { status: 500 });
+        return c.json({
+          message: "Publicidad generada correctamente.",
+          adImageUrl: adImageUrl,
+          imageId: result[0].id
+        }, { status: 200 });
+      } else {
+        console.warn("No se encontró inlineData en la respuesta del worker:", workerResponse);
+        return c.json({ message: "El worker no devolvió una imagen generada." }, { status: 500 });
       }
 
     } catch (error: any) {
