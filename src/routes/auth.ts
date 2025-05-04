@@ -208,7 +208,7 @@ export const authRoute = new Hono()
         
             const error = c.req.query('error');
             console.error("Google OAuth Error:", error);
-            return c.redirect(`https://tiendia.app/login?error=${error || 'unknown_google_error'}`);
+            return c.redirect(`https://my.tiendia.app/login?error=${error || 'unknown_google_error'}`);
     }
 
     try {
@@ -248,7 +248,7 @@ export const authRoute = new Hono()
                 .where(eq(users.id, user.id));
                 user.googleId = googleId; 
             } else if (user.googleId !== googleId) {
-                return c.redirect(`https://tiendia.app/login?error=email_google_conflict`);
+                return c.redirect(`https://my.tiendia.app/login?error=email_google_conflict`);
             }
             
 
@@ -282,12 +282,12 @@ export const authRoute = new Hono()
             maxAge: 7 * 24 * 60 * 60,
         });
         
-        return c.redirect(`https://tiendia.app/home`); 
+        return c.redirect(`https://my.tiendia.app/home`); 
 
 
     } catch (error: any) {
         console.error("Google Callback Error:", error);
         
-        return c.redirect(`https://tiendia.app/login?error=google_callback_failed`);
+        return c.redirect(`https://my.tiendia.app/login?error=google_callback_failed`);
     }
 });

@@ -18,6 +18,7 @@ const app = new Hono();
 const allowedOrigins = [
   'https://admin.tiendia.app',
   'https://tiendia.app',
+  'https://my.tiendia.app',
   'http://localhost:5173', // Desarrollo local
 ];
 

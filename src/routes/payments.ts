@@ -47,7 +47,7 @@ paymentsRoute.post("/create-preference", zValidator("json",creditSchema), async 
           }
         ],
         back_urls: {
-          success: `https://tiendia.app/home`,
+          success: `https://my.tiendia.app/home`,
         },
         notification_url: "https://api.tiendia.app/api/payments/webhook"
       }),
