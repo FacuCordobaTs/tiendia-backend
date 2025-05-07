@@ -526,16 +526,19 @@ productsRoute.post("/images/modify/:imageId", authMiddleware, zValidator("json",
     const workerResponse = await requestQueue.enqueue(workerPayload, workerUrl);
     console.log(`Respuesta de modificación del worker recibida`);
 
-    const modifiedImageData = workerResponse.geminiData?.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
-
-    if (!modifiedImageData) {
+    // Modificación: Usar el mismo patrón que en generate-ad
+    const imagePart = workerResponse.geminiData?.candidates?.[0]?.content?.parts?.find((part: { inlineData: any; }) => part.inlineData);
+    if (!imagePart?.inlineData) {
       console.error("El worker no devolvió datos de imagen modificada:", workerResponse);
       return c.json({ message: "Error al generar la imagen modificada por el worker." }, { status: 500 });
     }
 
+    const modifiedImageData = imagePart.inlineData.data;
+    const mimeType = imagePart.inlineData.mimeType || "image/png";
+
     let modifiedImageUrl: string;
     try {
-      modifiedImageUrl = await saveImage(`data:image/png;base64,${modifiedImageData}`);
+      modifiedImageUrl = await saveImage(`data:${mimeType};base64,${modifiedImageData}`);
       console.log("Imagen modificada guardada en:", modifiedImageUrl);
 
       const result = await db.insert(images).values({
@@ -572,7 +575,6 @@ productsRoute.post("/images/modify/:imageId", authMiddleware, zValidator("json",
     return c.json({ message: errorMessage }, { status: 500 });
   }
 });
-
 productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("json", generateProductSchema), async (c) => {
   const { image: userImageBase64, includeModel } = c.req.valid("json");
   const db = drizzle(pool);
