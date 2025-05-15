@@ -711,7 +711,7 @@ productsRoute.post("/migrate-images", authMiddleware, async (c) => {
   let updatedProductUrlsCount = 0;
   let updatedGeneratedImageUrlsCount = 0;
   let errors: string[] = [];
-  const OLD_R2_DOMAIN_PATTERN = 'https://pub-%.r2.dev/%';
+  const OLD_R2_DOMAIN_PATTERN = 'images.tiendia.app/%';
 
   try {
     console.log("Iniciando migración de URLs de imágenes de productos...");
