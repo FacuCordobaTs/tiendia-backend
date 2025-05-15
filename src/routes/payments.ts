@@ -69,7 +69,6 @@ paymentsRoute.post("/create-preference", zValidator("json",creditSchema), async 
 paymentsRoute.post('/webhook', async (c) => {
     try {
       const id = c.req.query('id');
-    console.log("SOLICITUD RECIBIDA MP", id);
 
     if (!id) {
         return c.json({ error: 'Missing id parameter' }, 400);
@@ -85,15 +84,12 @@ paymentsRoute.post('/webhook', async (c) => {
     })
 
     const data = await response.json() as { items: { id: string, title: string, unit_price: number, quantity: number }[], preference_id: string };
-    console.log("Data: " ,data)
 
     const credits = data.items[0].unit_price;
     const preferenceId = data.preference_id;
 
     const user = await db.select().from(users)
         .where(eq(users.lastPreferenceId, preferenceId));
-
-    console.log(user[0])
 
     if (user[0] && user[0].credits != null && !user[0].lastPreferencePaid) {
         await db.update(users).set({

@@ -5,10 +5,8 @@ import { drizzle } from "drizzle-orm/mysql2";
 import { pool } from "../db";
 import { images, products, users } from "../db/schema";
 import { authMiddleware } from "../middlewares/auth.middleware";
-import { eq, sql, like, notLike } from "drizzle-orm"; // Added like and notLike
+import { eq, sql, like, notLike, and } from "drizzle-orm"; // Added 'and', removed like and notLike from previous comment
 import UUID from "uuid-js";
-import { readFile, writeFile, unlink, stat } from "fs/promises"; // Added stat
-import { join } from "path";
 import * as fs from "fs";
 import jwt, {JwtPayload} from "jsonwebtoken";
 import { getCookie } from "hono/cookie";
@@ -45,8 +43,6 @@ const generateProductSchema = z.object({
   image: z.string().min(10),
   includeModel: z.boolean().optional().default(false),
 });
-
-const UPLOAD_DIR = join(process.cwd(), "public");
 
 async function saveImage(base64String: string): Promise<string> {
   const match = base64String.match(/^data:(image\/\w+);base64,/);
@@ -712,145 +708,114 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
 
 productsRoute.post("/migrate-images", authMiddleware, async (c) => {
   const db = drizzle(pool);
-  let migratedProductsCount = 0;
-  let migratedImagesCount = 0;
+  let updatedProductUrlsCount = 0;
+  let updatedGeneratedImageUrlsCount = 0;
   let errors: string[] = [];
+  const OLD_R2_DOMAIN_PATTERN = 'https://pub-%.r2.dev/%';
 
   try {
-    console.log("Iniciando migración de imágenes de productos...");
-    const localProducts = await db.select({
+    console.log("Iniciando migración de URLs de imágenes de productos...");
+    const productsToUpdate = await db.select({
         id: products.id,
         imageURL: products.imageURL
       })
       .from(products)
-      .where(notLike(products.imageURL, `${R2_PUBLIC_URL}/%`));
+      .where(and(
+        like(products.imageURL, OLD_R2_DOMAIN_PATTERN),
+        notLike(products.imageURL, `${R2_PUBLIC_URL}/%`)
+      ));
 
-    console.log(`Encontrados ${localProducts.length} productos con posibles imágenes locales.`);
+    console.log(`Encontrados ${productsToUpdate.length} productos con URLs de R2 antiguas para actualizar.`);
 
-    for (const product of localProducts) {
-      if (!product.imageURL || product.imageURL.startsWith('http')) {
+    for (const product of productsToUpdate) {
+      if (!product.imageURL) {
+        console.warn(`Producto ID ${product.id} tiene imageURL nulo/vacío en los resultados, saltando.`);
         continue;
       }
 
-      const localPathGuess = join(UPLOAD_DIR, product.imageURL.startsWith('/') ? product.imageURL.substring(1) : product.imageURL);
-
       try {
-        await stat(localPathGuess);
-        console.log(`Procesando producto ID ${product.id}, imagen local: ${localPathGuess}`);
+        const oldUrl = product.imageURL;
+        const fileName = oldUrl.split('/').pop();
 
-        const fileBuffer = await readFile(localPathGuess);
-        const mimeTypeMatch = product.imageURL.match(/\.([^.]+)$/);
-        const fileExtension = mimeTypeMatch ? mimeTypeMatch[1].toLowerCase() : 'png';
-        let mimeType = `image/${fileExtension === 'jpg' ? 'jpeg' : fileExtension}`;
-        if (!ALLOWED_MIME_TYPES.includes(mimeType)) {
-            mimeType = 'image/png';
-            console.warn(`Tipo MIME no estándar detectado para ${product.imageURL}, usando ${mimeType}`);
+        if (!fileName) {
+          console.warn(`No se pudo extraer el nombre de archivo de la URL: ${oldUrl} para el producto ID ${product.id}. Saltando.`);
+          errors.push(`Error extrayendo nombre de archivo para producto ${product.id}: ${oldUrl}`);
+          continue;
         }
 
-        const uuid = UUID.create().toString();
-        const r2FileName = `${uuid}.${fileExtension}`;
-
-        const command = new PutObjectCommand({
-          Bucket: R2_BUCKET_NAME!,
-          Key: r2FileName,
-          Body: fileBuffer,
-          ContentType: mimeType,
-        });
-
-        await s3Client.send(command);
-        const newR2Url = `${R2_PUBLIC_URL}/${r2FileName}`;
+        const newR2Url = `${R2_PUBLIC_URL}/${fileName}`;
 
         await db.update(products)
           .set({ imageURL: newR2Url })
           .where(eq(products.id, product.id));
 
-        console.log(`Producto ID ${product.id}: Imagen migrada a ${newR2Url}`);
-        migratedProductsCount++;
+        console.log(`Producto ID ${product.id}: URL de imagen actualizada a ${newR2Url}`);
+        updatedProductUrlsCount++;
 
       } catch (error: any) {
-        if (error.code === 'ENOENT') {
-          console.warn(`Archivo local no encontrado para producto ID ${product.id}: ${localPathGuess}. Saltando.`);
-        } else {
-          console.error(`Error migrando imagen para producto ID ${product.id} (${product.imageURL}):`, error);
-          errors.push(`Error producto ${product.id}: ${product.imageURL}`);
-        }
+        console.error(`Error actualizando URL para producto ID ${product.id} (${product.imageURL}):`, error);
+        errors.push(`Error producto ${product.id} (${product.imageURL}): ${error.message}`);
       }
     }
-    console.log("Migración de imágenes de productos completada.");
+    console.log("Migración de URLs de imágenes de productos completada.");
 
-  } catch (error) {
-    console.error("Error durante la migración de imágenes de productos:", error);
-    errors.push("Error general en migración de productos");
+  } catch (error: any) {
+    console.error("Error durante la migración de URLs de imágenes de productos:", error);
+    errors.push(`Error general en migración de URLs de productos: ${error.message}`);
   }
 
   try {
-    console.log("Iniciando migración de imágenes generadas...");
-    const localGeneratedImages = await db.select({
+    console.log("Iniciando migración de URLs de imágenes generadas...");
+    const generatedImagesToUpdate = await db.select({
         id: images.id,
         url: images.url
       })
       .from(images)
-      .where(notLike(images.url, `${R2_PUBLIC_URL}/%`));
+      .where(and(
+        like(images.url, OLD_R2_DOMAIN_PATTERN),
+        notLike(images.url, `${R2_PUBLIC_URL}/%`)
+      ));
 
-    console.log(`Encontradas ${localGeneratedImages.length} imágenes generadas con posibles rutas locales.`);
+    console.log(`Encontradas ${generatedImagesToUpdate.length} imágenes generadas con URLs de R2 antiguas para actualizar.`);
 
-    for (const image of localGeneratedImages) {
-      if (!image.url || image.url.startsWith('http')) {
+    for (const image of generatedImagesToUpdate) {
+      if (!image.url) {
+        console.warn(`Imagen generada ID ${image.id} tiene URL nula/vacía en los resultados, saltando.`);
         continue;
       }
 
-      const localPathGuess = join(UPLOAD_DIR, image.url.startsWith('/') ? image.url.substring(1) : image.url);
-
       try {
-        await stat(localPathGuess);
-        console.log(`Procesando imagen generada ID ${image.id}, ruta local: ${localPathGuess}`);
+        const oldUrl = image.url;
+        const fileName = oldUrl.split('/').pop();
 
-        const fileBuffer = await readFile(localPathGuess);
-        const mimeTypeMatch = image.url.match(/\.([^.]+)$/);
-        const fileExtension = mimeTypeMatch ? mimeTypeMatch[1].toLowerCase() : 'png';
-        let mimeType = `image/${fileExtension === 'jpg' ? 'jpeg' : fileExtension}`;
-        if (!ALLOWED_MIME_TYPES.includes(mimeType)) {
-            mimeType = 'image/png';
-            console.warn(`Tipo MIME no estándar detectado para ${image.url}, usando ${mimeType}`);
+        if (!fileName) {
+          console.warn(`No se pudo extraer el nombre de archivo de la URL: ${oldUrl} para la imagen ID ${image.id}. Saltando.`);
+          errors.push(`Error extrayendo nombre de archivo para imagen ${image.id}: ${oldUrl}`);
+          continue;
         }
-
-        const uuid = UUID.create().toString();
-        const r2FileName = `${uuid}.${fileExtension}`;
-
-        const command = new PutObjectCommand({
-          Bucket: R2_BUCKET_NAME!,
-          Key: r2FileName,
-          Body: fileBuffer,
-          ContentType: mimeType,
-        });
-
-        await s3Client.send(command);
-        const newR2Url = `${R2_PUBLIC_URL}/${r2FileName}`;
+        
+        const newR2Url = `${R2_PUBLIC_URL}/${fileName}`;
 
         await db.update(images)
           .set({ url: newR2Url })
           .where(eq(images.id, image.id));
 
-        console.log(`Imagen generada ID ${image.id}: Migrada a ${newR2Url}`);
-        migratedImagesCount++;
+        console.log(`Imagen generada ID ${image.id}: URL actualizada a ${newR2Url}`);
+        updatedGeneratedImageUrlsCount++;
 
       } catch (error: any) {
-        if (error.code === 'ENOENT') {
-          console.warn(`Archivo local no encontrado para imagen ID ${image.id}: ${localPathGuess}. Saltando.`);
-        } else {
-          console.error(`Error migrando imagen generada ID ${image.id} (${image.url}):`, error);
-          errors.push(`Error imagen ${image.id}: ${image.url}`);
-        }
+        console.error(`Error actualizando URL para imagen generada ID ${image.id} (${image.url}):`, error);
+        errors.push(`Error imagen ${image.id} (${image.url}): ${error.message}`);
       }
     }
-    console.log("Migración de imágenes generadas completada.");
+    console.log("Migración de URLs de imágenes generadas completada.");
 
-  } catch (error) {
-    console.error("Error durante la migración de imágenes generadas:", error);
-    errors.push("Error general en migración de imágenes generadas");
+  } catch (error: any) {
+    console.error("Error durante la migración de URLs de imágenes generadas:", error);
+    errors.push(`Error general en migración de URLs de imágenes generadas: ${error.message}`);
   }
 
-  const summary = `Migración completada. Productos migrados: ${migratedProductsCount}. Imágenes generadas migradas: ${migratedImagesCount}. Errores: ${errors.length}`;
+  const summary = `Migración de URLs completada. URLs de productos actualizadas: ${updatedProductUrlsCount}. URLs de imágenes generadas actualizadas: ${updatedGeneratedImageUrlsCount}. Errores: ${errors.length}`;
   console.log(summary);
   if (errors.length > 0) {
     console.error("Errores detallados:", errors);
@@ -858,8 +823,8 @@ productsRoute.post("/migrate-images", authMiddleware, async (c) => {
 
   return c.json({
     message: summary,
-    migratedProducts: migratedProductsCount,
-    migratedGeneratedImages: migratedImagesCount,
+    updatedProductUrls: updatedProductUrlsCount,
+    updatedGeneratedImageUrls: updatedGeneratedImageUrlsCount,
     errors: errors,
   });
 });
