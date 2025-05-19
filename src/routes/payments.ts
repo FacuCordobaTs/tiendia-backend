@@ -92,10 +92,28 @@ paymentsRoute.post('/webhook', async (c) => {
         .where(eq(users.lastPreferenceId, preferenceId));
 
     if (user[0] && user[0].credits != null && !user[0].lastPreferencePaid) {
+      if (credits == 80) {
         await db.update(users).set({
-          credits: user[0].credits + credits,
+          credits: user[0].credits + 50,
           lastPreferencePaid: true,
-      }).where(eq(users.lastPreferenceId, preferenceId));
+        }).where(eq(users.lastPreferenceId, preferenceId));
+      } else if (credits == 800) {
+        await db.update(users).set({
+          credits: user[0].credits + 500,
+          lastPreferencePaid: true,
+        }).where(eq(users.lastPreferenceId, preferenceId));
+      } else if (credits == 3500) {
+        await db.update(users).set({
+          credits: user[0].credits + 2500,
+          lastPreferencePaid: true,
+        }).where(eq(users.lastPreferenceId, preferenceId));
+      } else if (credits == 6800) {
+        await db.update(users).set({
+          credits: user[0].credits + 5000,
+          lastPreferencePaid: true,
+        }).where(eq(users.lastPreferenceId, preferenceId));
+      }
+      
     }
 
     return c.json({ message: 'Webhook processed successfully' }, 200);
