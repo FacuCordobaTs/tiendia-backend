@@ -829,4 +829,93 @@ productsRoute.post("/migrate-images", authMiddleware, async (c) => {
   });
 });
 
+productsRoute.post("/upload-images", authMiddleware, async (c) => {
+  const db = drizzle(pool);
+  const token = getCookie(c, 'token');
+  if (!token) {
+    return c.json({ message: 'No hay token' }, 401);
+  }
+
+  const decoded = await new Promise((resolve, reject) => {
+    jwt.verify(token, process.env.TOKEN_SECRET || 'my-secret', (error, decoded) => {
+      if (error) reject(error);
+      resolve(decoded);
+    });
+  });
+  const userId = (decoded as jwt.JwtPayload).id;
+
+  if (!userId) {
+    return c.json({ message: "Usuario no autenticado" }, 401);
+  }
+
+  try {
+    const formData = await c.req.formData();
+    const files = formData.getAll('images') as File[];
+    
+    if (!files.length) {
+      return c.json({ message: "No se proporcionaron imágenes" }, 400);
+    }
+
+    const workerUrl = "https://gemini-worker.facucordoba200.workers.dev";
+    const requestQueue = GeminiRequestQueue.getInstance();
+    const savedProducts = [];
+
+    // Procesar cada imagen y crear un producto para cada una
+    for (const file of files) {
+      let productName = "Producto";
+      const buffer = await file.arrayBuffer();
+      const base64 = Buffer.from(buffer).toString('base64');
+      const mimeType = file.type;
+
+      // Generar nombre del producto para esta imagen
+      console.log("Llamando al worker para generar nombre...");
+      const nameWorkerPayload = {
+        task: 'generate_name',
+        imageBase64: base64,
+        mimeType: mimeType,
+      };
+
+      try {
+        const nameResult = await requestQueue.enqueue(nameWorkerPayload, workerUrl);
+        if (nameResult.generatedName) {
+          productName = nameResult.generatedName;
+          console.log(`Nombre generado por worker: ${productName}`);
+        } else {
+          console.warn("Worker no devolvió nombre generado:", nameResult);
+        }
+      } catch (error) {
+        console.error("Error del worker (generando nombre):", error);
+      }
+
+      // Guardar la imagen en R2
+      const imageUrl = await saveImage(`data:${mimeType};base64,${base64}`);
+
+      // Crear el producto con su imagen
+      const insertedProduct = await db.insert(products).values({
+        name: productName,
+        imageURL: imageUrl,
+        createdById: userId,
+        createdAt: new Date(),
+      }).$returningId();
+
+      const productId = insertedProduct[0].id;
+
+      savedProducts.push({
+        id: productId,
+        name: productName,
+        imageUrl: imageUrl
+      });
+    }
+
+    return c.json({
+      message: "Productos creados correctamente",
+      products: savedProducts
+    }, 200);
+
+  } catch (error: any) {
+    console.error("Error en la ruta /upload-images:", error);
+    return c.json({ message: error.message || "Error al crear los productos" }, 500);
+  }
+});
+
 export default productsRoute;
