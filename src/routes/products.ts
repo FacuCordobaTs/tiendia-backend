@@ -1120,6 +1120,8 @@ productsRoute.post("/generate-pro/:id", authMiddleware, async (c) => {
 // Add WebSocket endpoint for generate-pro
 
 productsRoute.get("/sse/generate-pro/:id", async (c) => {
+  console.log('🔌 New SSE connection request received');
+  
   const headers = new Headers({
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache',
@@ -1131,6 +1133,7 @@ productsRoute.get("/sse/generate-pro/:id", async (c) => {
   const stream = new ReadableStream({
     start(controller) {
       const sendEvent = (data: any) => {
+        console.log('📤 Sending SSE event:', data);
         const message = `data: ${JSON.stringify(data)}\n\n`;
         controller.enqueue(new TextEncoder().encode(message));
       };
@@ -1138,15 +1141,24 @@ productsRoute.get("/sse/generate-pro/:id", async (c) => {
       const processRequest = async () => {
         try {
           const id = Number(c.req.param("id"));
+          console.log('🔄 Starting Pro generation process for product:', id);
+          
           const db = drizzle(pool);
           const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
           const OPENAI_API_URL = 'https://api.openai.com/v1/images/edits';
 
-          if (!OPENAI_API_KEY) throw new Error('OpenAI API key not configured');
+          if (!OPENAI_API_KEY) {
+            console.error('❌ OpenAI API key not configured');
+            throw new Error('OpenAI API key not configured');
+          }
 
           const token = getCookie(c, 'token');
-          if (!token) throw new Error("Unauthorized");
+          if (!token) {
+            console.error('❌ No authentication token found');
+            throw new Error("Unauthorized");
+          }
 
+          console.log('🔑 Verifying user token');
           const decoded = await new Promise((resolve, reject) => {
             jwt.verify(token, process.env.TOKEN_SECRET || 'my-secret', (error, decoded) => {
               if (error) reject(error);
@@ -1155,18 +1167,24 @@ productsRoute.get("/sse/generate-pro/:id", async (c) => {
           });
 
           const userId = (decoded as JwtPayload).id;
+          console.log('👤 User authenticated:', userId);
 
           const credits = await db.select({ credits: users.credits })
             .from(users)
             .where(eq(users.id, userId));
 
           if (!credits?.[0]?.credits || credits[0].credits < 100) {
+            console.error('❌ Insufficient credits:', credits?.[0]?.credits);
             throw new Error("Créditos insuficientes");
           }
 
-          if (isNaN(id)) throw new Error("ID inválido");
+          if (isNaN(id)) {
+            console.error('❌ Invalid product ID:', id);
+            throw new Error("ID inválido");
+          }
 
           sendEvent({ status: "processing", message: "Obteniendo producto..." });
+          console.log('📥 Fetching product details');
 
           const productResult = await db
             .select({ imageURL: products.imageURL })
@@ -1176,13 +1194,18 @@ productsRoute.get("/sse/generate-pro/:id", async (c) => {
 
           const product = productResult[0];
           if (!product || !product.imageURL) {
+            console.error('❌ Product not found or has no image:', { productId: id, hasImage: !!product?.imageURL });
             throw new Error("Producto no encontrado o sin imagen");
           }
 
           sendEvent({ status: "processing", message: "Descargando imagen..." });
+          console.log('📥 Downloading product image');
 
           const response = await fetch(product.imageURL);
-          if (!response.ok) throw new Error(`Error HTTP ${response.status} al descargar imagen`);
+          if (!response.ok) {
+            console.error('❌ Failed to download image:', response.status);
+            throw new Error(`Error HTTP ${response.status} al descargar imagen`);
+          }
 
           let mime = response.headers.get("content-type") || "";
           if (!['image/png', 'image/jpeg', 'image/webp'].includes(mime)) {
@@ -1190,19 +1213,24 @@ productsRoute.get("/sse/generate-pro/:id", async (c) => {
             if (ext === "jpg" || ext === "jpeg") mime = "image/jpeg";
             else if (ext === "png") mime = "image/png";
             else if (ext === "webp") mime = "image/webp";
-            else throw new Error("Tipo MIME no permitido");
+            else {
+              console.error('❌ Invalid mime type:', mime);
+              throw new Error("Tipo MIME no permitido");
+            }
           }
 
           const arrayBuf = await response.arrayBuffer();
           const buffer = Buffer.from(arrayBuf);
           
           if (buffer.length > 25 * 1024 * 1024) {
+            console.error('❌ Image too large:', buffer.length);
             throw new Error("Imagen mayor a 25MB");
           }
 
           const imageBlob = new Blob([buffer], { type: mime });
 
           sendEvent({ status: "processing", message: "Generando imagen con IA..." });
+          console.log('🤖 Sending request to OpenAI');
 
           const prompt = `Generate a fashion-forward, editorial-style image with these exact specifications:  
           The clothing item must be worn by a model (male or female) with a bold, expressive pose that conveys confidence or attitude  
@@ -1238,43 +1266,54 @@ productsRoute.get("/sse/generate-pro/:id", async (c) => {
 
           if (!openaiResponse.ok) {
             const errorBody = await openaiResponse.text();
+            console.error('❌ OpenAI API error:', { status: openaiResponse.status, body: errorBody });
             throw new Error(`OpenAI error: ${errorBody}`);
           }
 
+          console.log('📥 Received response from OpenAI');
           const result = await openaiResponse.json() as {
             data: { b64_json: string }[];
           };
 
           const imageB64 = result.data?.[0]?.b64_json;
-          if (!imageB64) throw new Error("No image data in response");
+          if (!imageB64) {
+            console.error('❌ No image data in OpenAI response');
+            throw new Error("No image data in response");
+          }
 
           sendEvent({ status: "processing", message: "Guardando imagen..." });
+          console.log('💾 Saving generated image');
 
           const savedImageUrl = await saveImage(`data:${mime};base64,${imageB64}`);
+          console.log('✅ Image saved successfully:', savedImageUrl);
 
           const dbResult = await db.insert(images).values({
             url: savedImageUrl,
             productId: id,
             createdAt: new Date(),
           }).$returningId();
+          console.log('💾 Image record created in database:', dbResult[0].id);
 
           await db.update(users).set({
             credits: credits[0].credits - 100,
           }).where(eq(users.id, userId));
+          console.log('💳 Updated user credits');
 
           sendEvent({
             status: "done",
             imageUrl: savedImageUrl,
             imageId: dbResult[0].id
           });
+          console.log('✅ Pro generation completed successfully');
 
         } catch (error: any) {
-          console.error("Error en SSE:", error);
+          console.error('❌ Error in SSE process:', error);
           sendEvent({
             status: "error",
             message: error.message || "Error inesperado"
           });
         } finally {
+          console.log('🏁 Closing SSE connection');
           controller.close();
         }
       };
