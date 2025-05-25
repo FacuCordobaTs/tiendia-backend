@@ -1117,4 +1117,213 @@ productsRoute.post("/generate-pro/:id", authMiddleware, async (c) => {
   }
 });
 
+// Add WebSocket endpoint for generate-pro
+productsRoute.get("/ws/generate-pro/:id", async (c) => {
+  const id = Number(c.req.param("id"));
+  const db = drizzle(pool);
+  const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+  const OPENAI_API_URL = 'https://api.openai.com/v1/images/edits';
+
+  if (!OPENAI_API_KEY) {
+    return c.json({ error: 'OpenAI API key not configured' }, 500);
+  }
+
+  const token = getCookie(c, 'token');
+  if (!token) return c.json({ error: 'Unauthorized' }, 401);
+
+  const decoded = await new Promise((resolve, reject) => {
+    jwt.verify(token, process.env.TOKEN_SECRET || 'my-secret', (error, decoded) => {
+      if (error) reject(error);
+      resolve(decoded);
+    });
+  });
+
+  const userId = (decoded as JwtPayload).id;
+
+  const credits = await db.select({
+    credits: users.credits,
+  })
+  .from(users)
+  .where(eq(users.id, userId));
+
+  if (credits && credits[0] && credits[0].credits && credits[0].credits < 100) {
+    return c.json({ message: "Creditos no suficientes" }, { status: 400 });
+  }
+
+  if (isNaN(id)) {
+    return c.json({ error: "ID de producto inválido" }, { status: 400 });
+  }
+
+  try {
+    const productResult = await db
+      .select({
+        imageURL: products.imageURL,
+      })
+      .from(products)
+      .where(eq(products.id, id))
+      .limit(1);
+
+    if (!productResult || productResult.length === 0) {
+      return c.json({ message: "Producto no encontrado" }, { status: 404 });
+    }
+    const product = productResult[0];
+
+    if (!product.imageURL) {
+      return c.json(
+        { message: "El producto no tiene una imagen para generar publicidad." },
+        { status: 400 }
+      );
+    }
+    const originalProductImageUrl = product.imageURL;
+
+    const originalImageName = product.imageURL.split("/").pop();
+    if (!originalImageName) {
+      console.error("No se pudo extraer el nombre de archivo de:", product.imageURL);
+      return c.json({ message: "Error al procesar la URL de la imagen original." }, { status: 500 });
+    }
+    
+    let originalImageBase64: string;
+    let originalMimeType: string;
+
+    try {
+      console.log(`Descargando imagen original desde R2: ${originalProductImageUrl}`);
+      const response = await fetch(originalProductImageUrl);
+      if (!response.ok) {
+        throw new Error(`Error HTTP ${response.status} al descargar imagen de R2`);
+      }
+      const contentTypeHeader = response.headers.get("content-type");
+
+      if (contentTypeHeader && ALLOWED_MIME_TYPES.includes(contentTypeHeader)) {
+        originalMimeType = contentTypeHeader;
+      } else {
+        const urlPath = new URL(originalProductImageUrl).pathname;
+        const extension = urlPath.split('.').pop()?.toLowerCase();
+        if (extension === "jpg" || extension === "jpeg") originalMimeType = "image/jpeg";
+        else if (extension === "png") originalMimeType = "image/png";
+        else if (extension === "webp") originalMimeType = "image/webp";
+        else { throw new Error("Tipo MIME desconocido o no permitido para la imagen original."); }
+        console.warn(`Usando MimeType ${originalMimeType} basado en extensión para ${originalProductImageUrl}`);
+      }
+
+      const imageBuffer = await response.arrayBuffer();
+      originalImageBase64 = Buffer.from(imageBuffer).toString("base64");
+      console.log(`Imagen original descargada de R2 y convertida a Base64 (${(originalImageBase64.length * 3/4 / 1024).toFixed(2)} KB)`);
+
+    } catch (fetchError: any) {
+      console.error(`Error al obtener/procesar la imagen original desde R2 (${originalProductImageUrl}):`, fetchError);
+      return c.json({ message: "Error crítico al acceder a la imagen original del producto." }, { status: 500 });
+    }
+
+    // Validate mime type
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(originalMimeType)) {
+      return c.json({ error: 'Invalid mime type. Must be image/png, image/jpeg, or image/webp.' }, 400);
+    }
+
+    // Check file size (25MB limit)
+    const imageBuffer = Buffer.from(originalImageBase64, 'base64');
+    if (imageBuffer.length > 25 * 1024 * 1024) {
+      return c.json({ error: 'Image size exceeds 25MB limit.' }, 400);
+    }
+
+    // Create a Blob-like object
+    const imageBlob = new Blob([imageBuffer], { type: originalMimeType });
+
+    const prompt = `Generate a fashion-forward, editorial-style image with these exact specifications:  
+    The clothing item must be worn by a model (male or female) with a bold, expressive pose that conveys confidence or attitude  
+    Model visibility: flexible – can include waist-up, full body, or dynamic crop depending on composition  
+    Pose and body angle must look like a candid or intentional street-style photo – dynamic, casual or confident  
+    Facial expression should feel natural or slightly aloof – model can look at the camera or away  
+    Lighting should mimic on-camera flash photography: harsh flash shadows, high contrast, slightly overexposed skin highlights  
+    Scene must resemble a real-life environment: urban backdrops (walls, streets, elevators, rooftops), daylight or nightlife  
+    Slight grain or imperfection to mimic analog/digital flash aesthetic  
+    Background can include tiled walls, elevators, skies, or street textures – no plain studio setups  
+    Fashion styling can include accessories like sunglasses, bags, or earrings if they match the look  
+    The image should feel like a mix of 90s/2000s Y2K, streetwear, or Instagram fashion influencer vibes  
+    Clothing and fabric must remain sharp and color-accurate despite the creative lighting  
+    High resolution, realistic depth, professional post-processing  
+    No graphic design elements, logos, or overlay text  
+    9:16 proportion`;
+
+    console.log(`Enviando solicitud a OpenAI para el producto ID: ${id}`);
+    const formData = new FormData();
+    formData.append('model', 'gpt-image-1');
+    formData.append('prompt', prompt);
+    formData.append('n', '1');
+    formData.append('size', '1024x1536');
+    formData.append('quality', 'high');
+    formData.append('image', imageBlob, 'image.' + originalMimeType.split('/')[1]);
+
+    const openaiResponse = await fetch(OPENAI_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: formData
+    });
+
+    if (!openaiResponse.ok) {
+      const errorBody = await openaiResponse.text();
+      console.error("Error from OpenAI API:", openaiResponse.status, errorBody);
+      return c.json({ 
+        error: "Failed to generate image from OpenAI", 
+        details: errorBody 
+      }, 500);
+    }
+
+    const result = await openaiResponse.json() as { 
+      created: number;
+      data: { b64_json: string }[];
+      usage: {
+        total_tokens: number;
+        input_tokens: number;
+        output_tokens: number;
+        input_tokens_details: {
+          text_tokens: number;
+          image_tokens: number;
+        };
+      };
+    };
+
+    if (!result.data?.[0]?.b64_json) {
+      throw new Error('No image data in OpenAI response');
+    }
+
+    const savedImageUrl = await saveImage(`data:${originalMimeType};base64,${result.data[0].b64_json}`);
+    console.log("Imagen generada guardada en:", savedImageUrl);
+
+    const dbResult = await db.insert(images).values({
+      url: savedImageUrl,
+      productId: id,
+      createdAt: new Date(),
+    }).$returningId();
+    console.log(`Registro insertado en tabla 'images' para producto ${id}, URL: ${savedImageUrl}`);
+
+    if (credits[0] && credits[0].credits) { 
+      await db.update(users).set({
+        credits: credits[0].credits - 100,
+      }).where(eq(users.id, userId));
+    }
+    // Send WebSocket response
+    const ws = await (c.env as any).upgrade();
+    ws.send(JSON.stringify({
+      status: "done", 
+      imageUrl: savedImageUrl,
+      imageId: dbResult[0].id
+    }));
+    ws.close();
+
+  } catch (error: any) {
+    console.error("Error en la ruta /ws/generate-pro:", error);
+    const errorMessage = error.message || "Error interno del servidor al generar la publicidad.";
+    
+    // Send error via WebSocket
+    const ws = await (c.env as any).upgrade();
+    ws.send(JSON.stringify({
+      status: "error",
+      message: errorMessage
+    }));
+    ws.close();
+  }
+});
+
 export default productsRoute;
