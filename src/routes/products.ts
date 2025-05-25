@@ -1119,157 +1119,171 @@ productsRoute.post("/generate-pro/:id", authMiddleware, async (c) => {
 
 // Add WebSocket endpoint for generate-pro
 
-productsRoute.get("/ws/generate-pro/:id", async (c) => {
-  if (!c.req.raw.headers.get("upgrade")?.toLowerCase().includes("websocket")) {
-    return c.json({ error: "Expected a WebSocket request" }, 400);
-  }
+productsRoute.get("/sse/generate-pro/:id", async (c) => {
+  const headers = new Headers({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Headers': 'Cache-Control'
+  });
 
-  const ws = await (c.env as any).upgrade();
-
-  ws.onopen = async () => {
-    try {
-      const id = Number(c.req.param("id"));
-      const db = drizzle(pool);
-      const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-      const OPENAI_API_URL = 'https://api.openai.com/v1/images/edits';
-
-      if (!OPENAI_API_KEY) throw new Error('OpenAI API key not configured');
-
-      const token = getCookie(c, 'token');
-      if (!token) throw new Error("Unauthorized");
-
-      const decoded = await new Promise((resolve, reject) => {
-        jwt.verify(token, process.env.TOKEN_SECRET || 'my-secret', (error, decoded) => {
-          if (error) reject(error);
-          else resolve(decoded);
-        });
-      });
-
-      const userId = (decoded as JwtPayload).id;
-
-      const credits = await db.select({ credits: users.credits })
-        .from(users)
-        .where(eq(users.id, userId));
-
-      if (!credits?.[0]?.credits || credits[0].credits < 100) {
-        throw new Error("Créditos insuficientes");
-      }
-
-      if (isNaN(id)) throw new Error("ID inválido");
-
-      const productResult = await db
-        .select({ imageURL: products.imageURL })
-        .from(products)
-        .where(eq(products.id, id))
-        .limit(1);
-
-      const product = productResult[0];
-      if (!product || !product.imageURL) {
-        throw new Error("Producto no encontrado o sin imagen");
-      }
-
-      const originalImageName = product.imageURL.split("/").pop();
-      if (!originalImageName) throw new Error("Nombre de archivo inválido");
-
-      const response = await fetch(product.imageURL);
-      if (!response.ok) throw new Error(`Error HTTP ${response.status} al descargar imagen`);
-
-      let mime = response.headers.get("content-type") || "";
-      if (!['image/png', 'image/jpeg', 'image/webp'].includes(mime)) {
-        const ext = product.imageURL.split('.').pop()?.toLowerCase();
-        if (ext === "jpg" || ext === "jpeg") mime = "image/jpeg";
-        else if (ext === "png") mime = "image/png";
-        else if (ext === "webp") mime = "image/webp";
-        else throw new Error("Tipo MIME no permitido");
-      }
-
-      const arrayBuf = await response.arrayBuffer();
-      const base64 = Buffer.from(arrayBuf).toString("base64");
-
-      const buffer = Buffer.from(base64, 'base64');
-      if (buffer.length > 25 * 1024 * 1024) throw new Error("Imagen mayor a 25MB");
-
-      const imageBlob = new Blob([buffer], { type: mime });
-
-
-      const prompt = `Generate a fashion-forward, editorial-style image with these exact specifications:  
-      The clothing item must be worn by a model (male or female) with a bold, expressive pose that conveys confidence or attitude  
-      Model visibility: flexible – can include waist-up, full body, or dynamic crop depending on composition  
-      Pose and body angle must look like a candid or intentional street-style photo – dynamic, casual or confident  
-      Facial expression should feel natural or slightly aloof – model can look at the camera or away  
-      Lighting should mimic on-camera flash photography: harsh flash shadows, high contrast, slightly overexposed skin highlights  
-      Scene must resemble a real-life environment: urban backdrops (walls, streets, elevators, rooftops), daylight or nightlife  
-      Slight grain or imperfection to mimic analog/digital flash aesthetic  
-      Background can include tiled walls, elevators, skies, or street textures – no plain studio setups  
-      Fashion styling can include accessories like sunglasses, bags, or earrings if they match the look  
-      The image should feel like a mix of 90s/2000s Y2K, streetwear, or Instagram fashion influencer vibes  
-      Clothing and fabric must remain sharp and color-accurate despite the creative lighting  
-      High resolution, realistic depth, professional post-processing  
-      No graphic design elements, logos, or overlay text  
-      9:16 proportion`;
-
-      const formData = new FormData();
-      formData.append('model', 'gpt-image-1');
-      formData.append('prompt', prompt);
-      formData.append('n', '1');
-      formData.append('size', '1024x1536');
-      formData.append('quality', 'high');
-      formData.append('image', imageBlob, 'image.' + mime.split('/')[1]);
-
-      const openaiResponse = await fetch(OPENAI_API_URL, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        },
-        body: formData
-      });
-
-      if (!openaiResponse.ok) {
-        const errorBody = await openaiResponse.text();
-        throw new Error(`OpenAI error: ${errorBody}`);
-      }
-
-      const result = await openaiResponse.json() as {
-        data: { b64_json: string }[];
+  const stream = new ReadableStream({
+    start(controller) {
+      const sendEvent = (data: any) => {
+        const message = `data: ${JSON.stringify(data)}\n\n`;
+        controller.enqueue(new TextEncoder().encode(message));
       };
 
-      const imageB64 = result.data?.[0]?.b64_json;
-      if (!imageB64) throw new Error("No image data in response");
+      const processRequest = async () => {
+        try {
+          const id = Number(c.req.param("id"));
+          const db = drizzle(pool);
+          const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+          const OPENAI_API_URL = 'https://api.openai.com/v1/images/edits';
 
-      const savedImageUrl = await saveImage(`data:${mime};base64,${imageB64}`);
+          if (!OPENAI_API_KEY) throw new Error('OpenAI API key not configured');
 
-      const dbResult = await db.insert(images).values({
-        url: savedImageUrl,
-        productId: id,
-        createdAt: new Date(),
-      }).$returningId();
+          const token = getCookie(c, 'token');
+          if (!token) throw new Error("Unauthorized");
 
-      await db.update(users).set({
-        credits: credits[0].credits - 100,
-      }).where(eq(users.id, userId));
+          const decoded = await new Promise((resolve, reject) => {
+            jwt.verify(token, process.env.TOKEN_SECRET || 'my-secret', (error, decoded) => {
+              if (error) reject(error);
+              else resolve(decoded);
+            });
+          });
 
-      ws.send(JSON.stringify({
-        status: "done",
-        imageUrl: savedImageUrl,
-        imageId: dbResult[0].id
-      }));
-      ws.close();
+          const userId = (decoded as JwtPayload).id;
 
-    } catch (error: any) {
-      console.error("Error en WebSocket:", error);
-      ws.send(JSON.stringify({
-        status: "error",
-        message: error.message || "Error inesperado"
-      }));
-      ws.close();
+          const credits = await db.select({ credits: users.credits })
+            .from(users)
+            .where(eq(users.id, userId));
+
+          if (!credits?.[0]?.credits || credits[0].credits < 100) {
+            throw new Error("Créditos insuficientes");
+          }
+
+          if (isNaN(id)) throw new Error("ID inválido");
+
+          sendEvent({ status: "processing", message: "Obteniendo producto..." });
+
+          const productResult = await db
+            .select({ imageURL: products.imageURL })
+            .from(products)
+            .where(eq(products.id, id))
+            .limit(1);
+
+          const product = productResult[0];
+          if (!product || !product.imageURL) {
+            throw new Error("Producto no encontrado o sin imagen");
+          }
+
+          sendEvent({ status: "processing", message: "Descargando imagen..." });
+
+          const response = await fetch(product.imageURL);
+          if (!response.ok) throw new Error(`Error HTTP ${response.status} al descargar imagen`);
+
+          let mime = response.headers.get("content-type") || "";
+          if (!['image/png', 'image/jpeg', 'image/webp'].includes(mime)) {
+            const ext = product.imageURL.split('.').pop()?.toLowerCase();
+            if (ext === "jpg" || ext === "jpeg") mime = "image/jpeg";
+            else if (ext === "png") mime = "image/png";
+            else if (ext === "webp") mime = "image/webp";
+            else throw new Error("Tipo MIME no permitido");
+          }
+
+          const arrayBuf = await response.arrayBuffer();
+          const buffer = Buffer.from(arrayBuf);
+          
+          if (buffer.length > 25 * 1024 * 1024) {
+            throw new Error("Imagen mayor a 25MB");
+          }
+
+          const imageBlob = new Blob([buffer], { type: mime });
+
+          sendEvent({ status: "processing", message: "Generando imagen con IA..." });
+
+          const prompt = `Generate a fashion-forward, editorial-style image with these exact specifications:  
+          The clothing item must be worn by a model (male or female) with a bold, expressive pose that conveys confidence or attitude  
+          Model visibility: flexible – can include waist-up, full body, or dynamic crop depending on composition  
+          Pose and body angle must look like a candid or intentional street-style photo – dynamic, casual or confident  
+          Facial expression should feel natural or slightly aloof – model can look at the camera or away  
+          Lighting should mimic on-camera flash photography: harsh flash shadows, high contrast, slightly overexposed skin highlights  
+          Scene must resemble a real-life environment: urban backdrops (walls, streets, elevators, rooftops), daylight or nightlife  
+          Slight grain or imperfection to mimic analog/digital flash aesthetic  
+          Background can include tiled walls, elevators, skies, or street textures – no plain studio setups  
+          Fashion styling can include accessories like sunglasses, bags, or earrings if they match the look  
+          The image should feel like a mix of 90s/2000s Y2K, streetwear, or Instagram fashion influencer vibes  
+          Clothing and fabric must remain sharp and color-accurate despite the creative lighting  
+          High resolution, realistic depth, professional post-processing  
+          No graphic design elements, logos, or overlay text  
+          9:16 proportion`;
+
+          const formData = new FormData();
+          formData.append('model', 'gpt-image-1');
+          formData.append('prompt', prompt);
+          formData.append('n', '1');
+          formData.append('size', '1024x1536');
+          formData.append('quality', 'high');
+          formData.append('image', imageBlob, 'image.' + mime.split('/')[1]);
+
+          const openaiResponse = await fetch(OPENAI_API_URL, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${OPENAI_API_KEY}`,
+            },
+            body: formData
+          });
+
+          if (!openaiResponse.ok) {
+            const errorBody = await openaiResponse.text();
+            throw new Error(`OpenAI error: ${errorBody}`);
+          }
+
+          const result = await openaiResponse.json() as {
+            data: { b64_json: string }[];
+          };
+
+          const imageB64 = result.data?.[0]?.b64_json;
+          if (!imageB64) throw new Error("No image data in response");
+
+          sendEvent({ status: "processing", message: "Guardando imagen..." });
+
+          const savedImageUrl = await saveImage(`data:${mime};base64,${imageB64}`);
+
+          const dbResult = await db.insert(images).values({
+            url: savedImageUrl,
+            productId: id,
+            createdAt: new Date(),
+          }).$returningId();
+
+          await db.update(users).set({
+            credits: credits[0].credits - 100,
+          }).where(eq(users.id, userId));
+
+          sendEvent({
+            status: "done",
+            imageUrl: savedImageUrl,
+            imageId: dbResult[0].id
+          });
+
+        } catch (error: any) {
+          console.error("Error en SSE:", error);
+          sendEvent({
+            status: "error",
+            message: error.message || "Error inesperado"
+          });
+        } finally {
+          controller.close();
+        }
+      };
+
+      processRequest();
     }
-  };
+  });
 
-  ws.onerror = (err: any) => {
-    console.error("WebSocket error:", err);
-  };
-
-  return ws;
+  return new Response(stream, { headers });
 });
 
 
