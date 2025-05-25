@@ -921,7 +921,13 @@ productsRoute.post("/upload-images", authMiddleware, async (c) => {
 productsRoute.post("/generate-pro/:id", authMiddleware, async (c) => {
   const id = Number(c.req.param("id"));
   const db = drizzle(pool);
-  const workerUrl = "https://openai-worker.facucordoba200.workers.dev";
+  const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+  const OPENAI_API_URL = 'https://api.openai.com/v1/images/edits';
+
+  if (!OPENAI_API_KEY) {
+    return c.json({ error: 'OpenAI API key not configured' }, 500);
+  }
+
   const token = getCookie(c, 'token');
   if (!token) return c.json({ error: 'Unauthorized' }, 401);
 
@@ -1008,37 +1014,84 @@ productsRoute.post("/generate-pro/:id", authMiddleware, async (c) => {
       return c.json({ message: "Error crítico al acceder a la imagen original del producto." }, { status: 500 });
     }
 
-    console.log(`Enviando solicitud al worker OpenAI para el producto ID: ${id}`);
-    const workerResponse = await fetch(workerUrl, {
+    // Validate mime type
+    if (!['image/png', 'image/jpeg', 'image/webp'].includes(originalMimeType)) {
+      return c.json({ error: 'Invalid mime type. Must be image/png, image/jpeg, or image/webp.' }, 400);
+    }
+
+    // Check file size (25MB limit)
+    const imageBuffer = Buffer.from(originalImageBase64, 'base64');
+    if (imageBuffer.length > 25 * 1024 * 1024) {
+      return c.json({ error: 'Image size exceeds 25MB limit.' }, 400);
+    }
+
+    // Create a Blob-like object
+    const imageBlob = new Blob([imageBuffer], { type: originalMimeType });
+
+    const prompt = `Generate a fashion-forward, editorial-style image with these exact specifications:  
+  The clothing item must be worn by a model (male or female) with a bold, expressive pose that conveys confidence or attitude  
+  Model visibility: flexible – can include waist-up, full body, or dynamic crop depending on composition  
+  Pose and body angle must look like a candid or intentional street-style photo – dynamic, casual or confident  
+  Facial expression should feel natural or slightly aloof – model can look at the camera or away  
+  Lighting should mimic on-camera flash photography: harsh flash shadows, high contrast, slightly overexposed skin highlights  
+  Scene must resemble a real-life environment: urban backdrops (walls, streets, elevators, rooftops), daylight or nightlife  
+  Slight grain or imperfection to mimic analog/digital flash aesthetic  
+  Background can include tiled walls, elevators, skies, or street textures – no plain studio setups  
+  Fashion styling can include accessories like sunglasses, bags, or earrings if they match the look  
+  The image should feel like a mix of 90s/2000s Y2K, streetwear, or Instagram fashion influencer vibes  
+  Clothing and fabric must remain sharp and color-accurate despite the creative lighting  
+  High resolution, realistic depth, professional post-processing  
+  No graphic design elements, logos, or overlay text  
+  9:16 proportion`;
+
+    console.log(`Enviando solicitud a OpenAI para el producto ID: ${id}`);
+    const formData = new FormData();
+    formData.append('model', 'gpt-image-1');
+    formData.append('prompt', prompt);
+    formData.append('n', '1');
+    formData.append('size', '1024x1536');
+    formData.append('quality', 'high');
+    formData.append('image', imageBlob, 'image.' + originalMimeType.split('/')[1]);
+
+    const openaiResponse = await fetch(OPENAI_API_URL, {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
       },
-      body: JSON.stringify({
-        imageBase64: originalImageBase64,
-        mimeType: originalMimeType,
-      }),
+      body: formData
     });
 
-    if (!workerResponse.ok) {
-      const errorBody = await workerResponse.text();
-      console.error("Error from OpenAI Worker:", workerResponse.status, errorBody);
+    if (!openaiResponse.ok) {
+      const errorBody = await openaiResponse.text();
+      console.error("Error from OpenAI API:", openaiResponse.status, errorBody);
       return c.json({ 
         error: "Failed to generate image from OpenAI", 
         details: errorBody 
       }, 500);
     }
-    const workerResult = await workerResponse.json() as { imageUrl: string };
-    const adImageUrl = workerResult.imageUrl;
 
-    if (!adImageUrl) {
-      throw new Error('No image URL in OpenAI response');
+    const result = await openaiResponse.json() as { 
+      created: number;
+      data: { b64_json: string }[];
+      usage: {
+        total_tokens: number;
+        input_tokens: number;
+        output_tokens: number;
+        input_tokens_details: {
+          text_tokens: number;
+          image_tokens: number;
+        };
+      };
+    };
+
+    if (!result.data?.[0]?.b64_json) {
+      throw new Error('No image data in OpenAI response');
     }
 
-    const savedImageUrl = await saveImage(`data:${originalMimeType};base64,${adImageUrl}`);
+    const savedImageUrl = await saveImage(`data:${originalMimeType};base64,${result.data[0].b64_json}`);
     console.log("Imagen generada guardada en:", savedImageUrl);
 
-    const result = await db.insert(images).values({
+    const dbResult = await db.insert(images).values({
       url: savedImageUrl,
       productId: id,
       createdAt: new Date(),
@@ -1054,7 +1107,7 @@ productsRoute.post("/generate-pro/:id", authMiddleware, async (c) => {
     return c.json({
       message: "Publicidad generada correctamente.",
       adImageUrl: savedImageUrl,
-      imageId: result[0].id
+      imageId: dbResult[0].id
     }, { status: 200 });
 
   } catch (error: any) {
