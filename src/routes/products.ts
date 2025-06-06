@@ -1335,7 +1335,7 @@ productsRoute.get("/sse/generate-pro/:id", async (c) => {
 productsRoute.post("/personalize/:id", authMiddleware, zValidator("json", personalizeSchema), async (c) => {
   const id = Number(c.req.param("id"));
   const db = drizzle(pool);
-  const workerUrl = "https://personalized-worker.facucordoba200.workers.dev";
+  const workerUrl = "https://personalized-worker.facucordoba200.workers.dev/personalize-image";
   const requestQueue = GeminiRequestQueue.getInstance();
   const token = getCookie(c, 'token');
   if (!token) return c.json({ error: 'Unauthorized' }, 401);
