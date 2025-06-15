@@ -9,6 +9,7 @@ export const users = mysqlTable("users", {
     credits: int("credits").default(0),
     lastPreferenceId: varchar("last_preference_id", { length: 255 }),
     lastPreferencePaid: boolean("last_preference_paid").default(false),
+    suscriptionId: varchar("suscription_id", { length: 255 }),
 });
 
 export const products = mysqlTable("products", {

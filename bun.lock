@@ -19,7 +19,7 @@
         "google-auth-library": "^9.15.1",
         "hono": "^4.6.19",
         "jsonwebtoken": "^9.0.2",
-        "mercadopago": "^2.3.0",
+        "mercadopago": "^2.7.0",
         "mysql2": "^3.13.0",
         "uuid-js": "^0.7.5",
         "zod": "^3.24.1",
@@ -708,7 +708,7 @@
 
     "math-intrinsics": ["math-intrinsics@1.1.0", "", {}, "sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g=="],
 
-    "mercadopago": ["mercadopago@2.3.0", "", { "dependencies": { "node-fetch": "^2.6.12", "uuid": "^9.0.0" } }, "sha512-Kbt8d1uHfzHhBn8hOhl83wTa4qzsyq4EOxR+o37Xy1yfEyCZ5eCb480BcIbDAvWK8IxHlFPkGDU9KYGyrobeMA=="],
+    "mercadopago": ["mercadopago@2.7.0", "", { "dependencies": { "node-fetch": "^2.7.0", "uuid": "^9.0.0" } }, "sha512-B8r3Cr2tOV+zgAhNsr2fSGOSCSqO5b0tMzeHpZog9wR4ywjKcd/ef4PxsV/kr8cyqyuTeC8wTWS2G5/sPVEnSA=="],
 
     "mime": ["mime@3.0.0", "", { "bin": { "mime": "cli.js" } }, "sha512-jSCU7/VB1loIWBZe14aEYHU/+1UMEHoaO7qxCOVJOw9GgH72VAWppxNcjU+x9a2k3GSIBXNKxXQFqRvvZ7vr3A=="],
 

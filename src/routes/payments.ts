@@ -8,7 +8,7 @@ import { users } from "../db/schema";
 import { drizzle } from "drizzle-orm/mysql2";
 import { pool } from "../db";
 import { eq } from "drizzle-orm";
-
+import { MercadoPagoConfig, PreApproval} from "mercadopago";
 export type Env = {};
 
 const paymentsRoute = new Hono<{ Bindings: Env }>();
@@ -16,6 +16,69 @@ const paymentsRoute = new Hono<{ Bindings: Env }>();
 const creditSchema = z.object({
     credits: z.number(),
 });
+
+export const mercadopago = new MercadoPagoConfig({
+  accessToken: process.env.MP_ACCESS_TOKEN_TEST!,
+});
+
+paymentsRoute.post("/create-preapproval", async (c) => {
+  const db = drizzle(pool);
+  const token = getCookie(c, 'token');
+  
+  if (!token) return c.json({ error: 'Unauthorized' }, 401);
+  const decoded = await new Promise((resolve, reject) => {
+    jwt.verify(token, process.env.TOKEN_SECRET || 'my-secret', (error, decoded) => {
+      if (error) reject(error);
+      resolve(decoded);
+    });
+  });
+
+  const user = await db.select().from(users).where(eq(users.id, (decoded as JwtPayload).id));
+
+  const suscription = await new PreApproval(mercadopago).create({
+    body: {
+      back_url: "https://my.tiendia.app/home",
+      reason: "Suscripción a tiendia.app",
+      auto_recurring: {
+        frequency: 1, 
+        frequency_type: "months",
+        transaction_amount: 3500,
+        currency_id: "ARS",
+      },
+      payer_email: user[0].email,
+      status: "pending"
+    },
+  });
+
+  return c.json({ suscription });
+});
+
+paymentsRoute.post("/suscriptions-webhook", async (c) => {
+  const db = drizzle(pool);
+  const token = getCookie(c, 'token');
+  if (!token) return c.json({ error: 'Unauthorized' }, 401);
+
+  const decoded = await new Promise((resolve, reject) => {
+    jwt.verify(token, process.env.TOKEN_SECRET || 'my-secret', (error, decoded) => {
+      if (error) reject(error);
+      resolve(decoded);
+    });
+  });
+
+  const user = await db.select().from(users).where(eq(users.id, (decoded as JwtPayload).id));
+  
+  const body: {data: {id: string}; type: string} = await c.req.json();
+
+  if (body.type === "subscription_preapproval") {
+    const preapproval = await new PreApproval(mercadopago).get({id: body.data.id});
+    console.log(preapproval);
+    if (preapproval.status === "authorized") {
+      await db.update(users).set({
+        suscriptionId: body.data.id,
+      }).where(eq(users.id, (decoded as JwtPayload).id));
+    }
+  }
+})
 
 paymentsRoute.post("/create-preference", zValidator("json",creditSchema), async (c) => {
     const { credits } = c.req.valid("json");
