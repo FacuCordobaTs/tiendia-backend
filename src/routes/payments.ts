@@ -9,6 +9,8 @@ import { drizzle } from "drizzle-orm/mysql2";
 import { pool } from "../db";
 import { eq } from "drizzle-orm";
 import { MercadoPagoConfig, PreApproval} from "mercadopago";
+import paypal from "@paypal/checkout-server-sdk";
+
 export type Env = {};
 
 const paymentsRoute = new Hono<{ Bindings: Env }>();
@@ -17,11 +19,51 @@ const creditSchema = z.object({
     credits: z.number(),
 });
 
+const paypalSchema = z.object({
+    price: z.number(),
+}); 
+
 export const mercadopago = new MercadoPagoConfig({
   accessToken: process.env.MP_ACCESS_TOKEN_TEST!,
 });
 
 
+const environment = new paypal.core.SandboxEnvironment(process.env.PAYPAL_CLIENT_ID_TEST!, process.env.PAYPAL_SECRET_TEST!);
+const client = new paypal.core.PayPalHttpClient(environment);
+
+paymentsRoute.post("/create-paypal-order", zValidator("json", paypalSchema), async (c) => {
+    const { price } = c.req.valid("json");
+    const token = getCookie(c, 'token');
+    if (!token) return c.json({ error: 'Unauthorized' }, 401);
+    const db = drizzle(pool);
+
+    const decoded = await new Promise((resolve, reject) => {
+        jwt.verify(token, process.env.TOKEN_SECRET || 'my-secret', (error, decoded) => {
+            if (error) reject(error);
+            resolve(decoded);
+        });
+    });
+
+    const request = new paypal.orders.OrdersCreateRequest();
+    request.requestBody({
+        intent: "CAPTURE",
+        purchase_units: [
+            {
+                amount: {
+                    currency_code: "USD",
+                    value: price.toString(),
+                },
+                description: "Carga de imágenes",
+                
+            }
+        ]
+    })
+    
+    const response = await client.execute(request);
+    const orderId = response.result.id;
+    return c.json({ orderId });
+    
+});
 
 paymentsRoute.post("/create-preference", zValidator("json",creditSchema), async (c) => {
     const { credits } = c.req.valid("json");

@@ -1,4 +1,4 @@
-import { mysqlTable, varchar, int, timestamp, text, boolean } from "drizzle-orm/mysql-core";
+import { mysqlTable, varchar, int, timestamp, text, boolean, date } from "drizzle-orm/mysql-core";
 
 export const users = mysqlTable("users", {
     id: int("id").primaryKey().autoincrement(),
@@ -25,4 +25,10 @@ export const images = mysqlTable("images", {
     url: varchar("url", { length: 255 }).notNull(),
     productId: int("productId").references(() => products.id).notNull(),
     createdAt: timestamp("created_at").notNull(),
+});
+
+export const api_usage = mysqlTable("api_usage", {
+    id: int("id").primaryKey().autoincrement(),
+    date: date("date").notNull(),
+    count: int("count").notNull().default(0),
 });

@@ -10,6 +10,8 @@
     "@google/genai": "^0.7.0",
     "@hono/zod-validator": "^0.4.2",
     "@libsql/client": "^0.14.0",
+    "@paypal/checkout-server-sdk": "^1.0.3",
+    "@types/paypal__checkout-server-sdk": "^1.0.8",
     "axios": "^1.7.9",
     "base64-arraybuffer": "^1.0.2",
     "bcryptjs": "^2.4.3",
