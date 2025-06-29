@@ -32,6 +32,7 @@ const environment = new paypal.core.SandboxEnvironment(process.env.PAYPAL_CLIENT
 const client = new paypal.core.PayPalHttpClient(environment);
 
 paymentsRoute.post("/create-paypal-order", zValidator("json", paypalSchema), async (c) => {
+  try {
     const { price } = c.req.valid("json");
     const token = getCookie(c, 'token');
     if (!token) return c.json({ error: 'Unauthorized' }, 401);
@@ -45,6 +46,9 @@ paymentsRoute.post("/create-paypal-order", zValidator("json", paypalSchema), asy
     });
 
     const request = new paypal.orders.OrdersCreateRequest();
+    
+    console.log(request);
+    
     request.requestBody({
         intent: "CAPTURE",
         purchase_units: [
@@ -62,6 +66,10 @@ paymentsRoute.post("/create-paypal-order", zValidator("json", paypalSchema), asy
     const response = await client.execute(request);
     const orderId = response.result.id;
     return c.json({ orderId });
+  } catch (error: any) {
+    console.error("Error creating PayPal order:", error);
+    return c.json({ error: error.message }, 500);
+  }
     
 });
 
