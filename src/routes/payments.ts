@@ -302,9 +302,9 @@ paymentsRoute.post('/paypal-webhook', async (c) => {
             // 4. Asignar créditos basados en el monto pagado
             let creditsToAdd = 0;
             if (amountPaid === 4.50) {
-                creditsToAdd = 50; // Ajustado al plan original
+                creditsToAdd = 2500; // Ajustado al plan original
             } else if (amountPaid === 8.30) {
-                creditsToAdd = 100; // Ajustado al plan original
+                creditsToAdd = 5000; // Ajustado al plan original
             } else {
                 console.warn(`Payment received for an unconfigured amount: ${amountPaid}`);
             }
