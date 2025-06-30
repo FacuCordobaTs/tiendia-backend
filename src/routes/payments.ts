@@ -44,6 +44,8 @@ paymentsRoute.post("/create-paypal-order", zValidator("json", paypalSchema), asy
             resolve(decoded);
         });
     });
+    const decodedPayload = decoded as JwtPayload;
+    const userId = decodedPayload.id;
 
     const request = new paypal.orders.OrdersCreateRequest();
     
@@ -57,7 +59,8 @@ paymentsRoute.post("/create-paypal-order", zValidator("json", paypalSchema), asy
                     currency_code: "USD",
                     value: price.toString(),
                 },
-                description: "Carga de imágenes",
+                description: "Carga de imágenes para generar con IA en tiendia.app",
+                custom_id: userId,
                 
             }
         ]
@@ -181,6 +184,120 @@ paymentsRoute.post('/webhook', async (c) => {
         return c.json({ error: 'Internal Server Error' }, 500);
     }
   });
+
+  async function verifyPaypalWebhook(c: any): Promise<boolean> {
+    const headers = c.req.header();
+    const body = await c.req.text(); // Necesitamos el body en formato raw para la verificación
+
+    const request = {
+        auth_algo: headers['paypal-auth-algo'],
+        cert_url: headers['paypal-cert-url'],
+        transmission_id: headers['paypal-transmission-id'],
+        transmission_sig: headers['paypal-transmission-sig'],
+        transmission_time: headers['paypal-transmission-time'],
+        webhook_id: process.env.PAYPAL_WEBHOOK_ID_TEST!, // Tu ID de webhook de PayPal
+        webhook_event: body
+    };
+
+    try {
+        const verificationResponse = await fetch('https://api.sandbox.paypal.com/v1/notifications/verify-webhook-signature', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${await getPaypalAccessToken()}` // Necesitamos un token de acceso
+            },
+            body: JSON.stringify(request)
+        });
+
+        const verificationData = await verificationResponse.json() as { verification_status: string };
+        return verificationData.verification_status === 'SUCCESS';
+    } catch (error) {
+        console.error("Error verifying PayPal webhook:", error);
+        return false;
+    }
+}
+
+async function getPaypalAccessToken(): Promise<string> {
+    const auth = Buffer.from(`${process.env.PAYPAL_CLIENT_ID_TEST!}:${process.env.PAYPAL_SECRET_TEST!}`).toString('base64');
+    const response = await fetch('https://api.sandbox.paypal.com/v1/oauth2/token', {
+        method: 'POST',
+        headers: {
+            'Authorization': `Basic ${auth}`,
+            'Content-Type': 'application/x-www-form-urlencoded'
+        },
+        body: 'grant_type=client_credentials'
+    });
+    const data = await response.json() as { access_token: string };
+    return data.access_token;
+}
+
+
+// Nuevo endpoint para el webhook de PayPal
+paymentsRoute.post('/paypal-webhook', async (c) => {
+    const db = drizzle(pool);
+
+    try {
+        // 1. Verificar la autenticidad del Webhook
+        const isVerified = await verifyPaypalWebhook(c);
+
+        if (!isVerified) {
+            console.error("PayPal webhook verification failed.");
+            return c.json({ error: 'Webhook verification failed' }, 401);
+        }
+
+        // 2. Procesar el evento
+        const event = await c.req.json();
+        
+        // Solo nos interesa el evento cuando la captura del pago se completa
+        if (event.event_type === 'PAYMENT.CAPTURE.COMPLETED') {
+            const capture = event.resource;
+            const purchaseUnit = capture.purchase_units[0];
+            const amountPaid = parseFloat(purchaseUnit.payments.captures[0].amount.value);
+            const userId = purchaseUnit.custom_id; // <-- Recuperamos el ID de nuestro usuario
+
+            if (!userId) {
+                console.error("Webhook received without a custom_id (userId).");
+                return c.json({ message: 'Processed, but no user ID found.' }, 200);
+            }
+            
+            // 3. Buscar al usuario en la BD
+            const userResult = await db.select().from(users).where(eq(users.id, userId));
+            const user = userResult[0];
+
+            if (!user || user.credits === null) {
+                console.error(`User with ID ${userId} not found or has null credits.`);
+                return c.json({ error: 'User not found' }, 404);
+            }
+
+            // 4. Asignar créditos basados en el monto pagado
+            let creditsToAdd = 0;
+            if (amountPaid === 4.50) {
+                creditsToAdd = 2500;
+            } else if (amountPaid === 8.30) {
+                creditsToAdd = 5000;
+            } else {
+                console.warn(`Payment received for an unconfigured amount: ${amountPaid}`);
+            }
+
+            if (creditsToAdd > 0) {
+                const newTotalCredits = (user.credits || 0) + creditsToAdd;
+                await db.update(users)
+                    .set({ credits: newTotalCredits })
+                    .where(eq(users.id, userId));
+                
+                console.log(`Successfully added ${creditsToAdd} credits to user ${userId}. New balance: ${newTotalCredits}.`);
+            }
+        }
+
+        // 5. Responder a PayPal con un 200 OK
+        // Es crucial responder rápidamente para que PayPal no reintente enviar el webhook.
+        return c.json({ message: 'Webhook processed successfully' }, 200);
+
+    } catch (error: any) {
+        console.error("Error processing PayPal webhook:", error.message);
+        return c.json({ error: 'Internal Server Error' }, 500);
+    }
+});
 
 
 export default paymentsRoute
