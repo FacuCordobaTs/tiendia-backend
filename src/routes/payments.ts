@@ -184,7 +184,6 @@ paymentsRoute.post('/webhook', async (c) => {
         return c.json({ error: 'Internal Server Error' }, 500);
     }
   });
-
   async function verifyPaypalWebhook(headers: any, rawBody: string): Promise<boolean> {
     // 1. Añadimos un log para ver el rawBody que estamos recibiendo.
     console.log("--- RAW BODY RECEIVED ---");
@@ -259,28 +258,32 @@ async function getPaypalAccessToken(): Promise<string> {
 }
 
 
-// Nuevo endpoint para el webhook de PayPal
+// Endpoint para el webhook de PayPal con la lógica corregida
 paymentsRoute.post('/paypal-webhook', async (c) => {
     const db = drizzle(pool);
 
     try {
+        // --- CAMBIO CLAVE 1: Leer el body UNA SOLA VEZ ---
+        const rawBody = await c.req.text();
+        const headers = c.req.header();
+        
         // 1. Verificar la autenticidad del Webhook
-        const isVerified = await verifyPaypalWebhook(c.req.header(), await c.req.text());
+        const isVerified = await verifyPaypalWebhook(headers, rawBody);
 
         if (!isVerified) {
-            console.error("PayPal webhook verification failed.");
+            console.error("PayPal webhook verification failed. Request rejected.");
             return c.json({ error: 'Webhook verification failed' }, 401);
         }
 
-        // 2. Procesar el evento
-        const event = await c.req.json();
+        // 2. Procesar el evento usando la variable que ya leímos
+        const event = JSON.parse(rawBody);
         
-        // Solo nos interesa el evento cuando la captura del pago se completa
         if (event.event_type === 'PAYMENT.CAPTURE.COMPLETED') {
-            const capture = event.resource;
-            const purchaseUnit = capture.purchase_units[0];
-            const amountPaid = parseFloat(purchaseUnit.payments.captures[0].amount.value);
-            const userId = purchaseUnit.custom_id; // <-- Recuperamos el ID de nuestro usuario
+            const resource = event.resource;
+
+            // --- CAMBIO CLAVE 2: Adaptar a la estructura de datos de PayPal ---
+            const amountPaid = parseFloat(resource.amount.value);
+            const userId = resource.custom_id;
 
             if (!userId) {
                 console.error("Webhook received without a custom_id (userId).");
@@ -299,9 +302,9 @@ paymentsRoute.post('/paypal-webhook', async (c) => {
             // 4. Asignar créditos basados en el monto pagado
             let creditsToAdd = 0;
             if (amountPaid === 4.50) {
-                creditsToAdd = 2500;
+                creditsToAdd = 50; // Ajustado al plan original
             } else if (amountPaid === 8.30) {
-                creditsToAdd = 5000;
+                creditsToAdd = 100; // Ajustado al plan original
             } else {
                 console.warn(`Payment received for an unconfigured amount: ${amountPaid}`);
             }
@@ -312,12 +315,11 @@ paymentsRoute.post('/paypal-webhook', async (c) => {
                     .set({ credits: newTotalCredits })
                     .where(eq(users.id, userId));
                 
-                console.log(`Successfully added ${creditsToAdd} credits to user ${userId}. New balance: ${newTotalCredits}.`);
+                console.log(`✅ Success: Added ${creditsToAdd} credits to user ${userId}. New balance: ${newTotalCredits}.`);
             }
         }
 
         // 5. Responder a PayPal con un 200 OK
-        // Es crucial responder rápidamente para que PayPal no reintente enviar el webhook.
         return c.json({ message: 'Webhook processed successfully' }, 200);
 
     } catch (error: any) {
