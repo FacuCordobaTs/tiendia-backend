@@ -210,6 +210,7 @@ paymentsRoute.post('/webhook', async (c) => {
         });
 
         const verificationData = await verificationResponse.json() as { verification_status: string };
+        console.log("VERIFICATION DATA: ", verificationData);
         return verificationData.verification_status === 'SUCCESS';
     } catch (error) {
         console.error("Error verifying PayPal webhook:", error);
