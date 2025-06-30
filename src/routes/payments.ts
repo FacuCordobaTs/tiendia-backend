@@ -185,35 +185,61 @@ paymentsRoute.post('/webhook', async (c) => {
     }
   });
 
-  async function verifyPaypalWebhook(c: any): Promise<boolean> {
-    const headers = c.req.header();
-    const body = await c.req.text(); // Necesitamos el body en formato raw para la verificación
+  async function verifyPaypalWebhook(headers: any, rawBody: string): Promise<boolean> {
+    // 1. Añadimos un log para ver el rawBody que estamos recibiendo.
+    console.log("--- RAW BODY RECEIVED ---");
+    console.log(rawBody);
+    console.log("-------------------------");
 
-    const request = {
-        auth_algo: headers['paypal-auth-algo'],
-        cert_url: headers['paypal-cert-url'],
-        transmission_id: headers['paypal-transmission-id'],
-        transmission_sig: headers['paypal-transmission-sig'],
-        transmission_time: headers['paypal-transmission-time'],
-        webhook_id: process.env.PAYPAL_WEBHOOK_ID_TEST!, // Tu ID de webhook de PayPal
-        webhook_event: body
-    };
+    // Validamos que el body no esté vacío
+    if (!rawBody) {
+        console.error("Webhook verification failed: Received empty body.");
+        return false;
+    }
 
     try {
+        const accessToken = await getPaypalAccessToken();
+
+        // Guard clause para asegurar que tenemos un token
+        if (!accessToken) {
+            console.error("Webhook verification failed: Could not retrieve PayPal access token.");
+            return false;
+        }
+
+        const requestPayload = {
+            auth_algo: headers['paypal-auth-algo'],
+            cert_url: headers['paypal-cert-url'],
+            transmission_id: headers['paypal-transmission-id'],
+            transmission_sig: headers['paypal-transmission-sig'],
+            transmission_time: headers['paypal-transmission-time'],
+            webhook_id: process.env.PAYPAL_WEBHOOK_ID_TEST!,
+            webhook_event: JSON.parse(rawBody) // Parseamos el body a un objeto JSON
+        };
+
+        // 2. Log CLAVE: Mostramos el objeto COMPLETO que vamos a enviar a PayPal.
+        console.log("--- SENDING TO PAYPAL FOR VERIFICATION ---");
+        console.log(JSON.stringify(requestPayload, null, 2)); // Usamos JSON.stringify para verlo bonito
+        console.log("------------------------------------------");
+
         const verificationResponse = await fetch('https://api.sandbox.paypal.com/v1/notifications/verify-webhook-signature', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${await getPaypalAccessToken()}` // Necesitamos un token de acceso
+                'Authorization': `Bearer ${accessToken}`
             },
-            body: JSON.stringify(request)
+            body: JSON.stringify(requestPayload) // Enviamos el payload stringificado
         });
-
+        
         const verificationData = await verificationResponse.json() as { verification_status: string };
-        console.log("VERIFICATION DATA: ", verificationData);
+
+        if (verificationData.verification_status !== 'SUCCESS') {
+            console.error('PayPal verification API responded with failure:', verificationData);
+        }
+        
         return verificationData.verification_status === 'SUCCESS';
+
     } catch (error) {
-        console.error("Error verifying PayPal webhook:", error);
+        console.error("CRITICAL: Error during webhook verification logic. Potentially malformed rawBody.", error);
         return false;
     }
 }
@@ -239,7 +265,7 @@ paymentsRoute.post('/paypal-webhook', async (c) => {
 
     try {
         // 1. Verificar la autenticidad del Webhook
-        const isVerified = await verifyPaypalWebhook(c);
+        const isVerified = await verifyPaypalWebhook(c.req.header(), await c.req.text());
 
         if (!isVerified) {
             console.error("PayPal webhook verification failed.");
