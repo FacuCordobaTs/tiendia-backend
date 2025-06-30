@@ -28,7 +28,7 @@ export const mercadopago = new MercadoPagoConfig({
 });
 
 
-const environment = new paypal.core.SandboxEnvironment(process.env.PAYPAL_CLIENT_ID_TEST!, process.env.PAYPAL_SECRET_TEST!);
+const environment = new paypal.core.LiveEnvironment(process.env.PAYPAL_CLIENT_ID!, process.env.PAYPAL_SECRET!)
 const client = new paypal.core.PayPalHttpClient(environment);
 
 paymentsRoute.post("/create-paypal-order", zValidator("json", paypalSchema), async (c) => {
@@ -211,7 +211,7 @@ paymentsRoute.post('/webhook', async (c) => {
             transmission_id: headers['paypal-transmission-id'],
             transmission_sig: headers['paypal-transmission-sig'],
             transmission_time: headers['paypal-transmission-time'],
-            webhook_id: process.env.PAYPAL_WEBHOOK_ID_TEST!,
+            webhook_id: process.env.PAYPAL_WEBHOOK_ID!,
             webhook_event: JSON.parse(rawBody) // Parseamos el body a un objeto JSON
         };
 
@@ -220,7 +220,7 @@ paymentsRoute.post('/webhook', async (c) => {
         console.log(JSON.stringify(requestPayload, null, 2)); // Usamos JSON.stringify para verlo bonito
         console.log("------------------------------------------");
 
-        const verificationResponse = await fetch('https://api.sandbox.paypal.com/v1/notifications/verify-webhook-signature', {
+        const verificationResponse = await fetch('https://api.paypal.com/v1/notifications/verify-webhook-signature', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -244,8 +244,8 @@ paymentsRoute.post('/webhook', async (c) => {
 }
 
 async function getPaypalAccessToken(): Promise<string> {
-    const auth = Buffer.from(`${process.env.PAYPAL_CLIENT_ID_TEST!}:${process.env.PAYPAL_SECRET_TEST!}`).toString('base64');
-    const response = await fetch('https://api.sandbox.paypal.com/v1/oauth2/token', {
+    const auth = Buffer.from(`${process.env.PAYPAL_CLIENT_ID!}:${process.env.PAYPAL_SECRET!}`).toString('base64');
+    const response = await fetch('https://api.paypal.com/v1/oauth2/token', {
         method: 'POST',
         headers: {
             'Authorization': `Basic ${auth}`,
