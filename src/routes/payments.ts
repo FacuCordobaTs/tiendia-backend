@@ -168,7 +168,7 @@ paymentsRoute.post('/webhook', async (c) => {
             "notification_url": "https://api.tiendia.app/api/payments/dlocal-webhook"
         };
   
-        const response = await fetch(`https://api-sbx.dlocalgo.com/v1/payments`, {
+        const response = await fetch(`https://api.dlocalgo.com/v1/payments`, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${DLOCAL_API_KEY}:${DLOCAL_SECRET_KEY}`,
@@ -250,7 +250,7 @@ paymentsRoute.post('/webhook', async (c) => {
         console.log('Processing dLocal notification for payment:', payment_id);
   
         // Obtener el estado actualizado del pago desde dLocal
-        const paymentResponse = await fetch(`https://api-sbx.dlocalgo.com/v1/payments/${payment_id}`, {
+        const paymentResponse = await fetch(`https://api.dlocalgo.com/v1/payments/${payment_id}`, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${DLOCAL_API_KEY}:${DLOCAL_SECRET_KEY}`,
