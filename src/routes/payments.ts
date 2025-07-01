@@ -264,7 +264,7 @@ paymentsRoute.post('/webhook', async (c) => {
   
         const paymentDetails = await paymentResponse.json() as { status: string, amount: number, order_id: string };
         const db = drizzle(pool);
-        
+        console.log(paymentDetails)
         // Buscar el usuario por el payment_id
         const user = await db.select().from(users)
             .where(eq(users.lastPreferenceId, paymentDetails.order_id));
