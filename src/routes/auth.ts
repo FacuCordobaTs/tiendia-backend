@@ -111,7 +111,6 @@ export const authRoute = new Hono()
         return c.json({ message: 'Error al registrar el usuario'}, 400);
     }
 })
-// Rutas no modificadas (login, profile, logout, fcm-token) se mantienen igual
 .post('/login', zValidator("json", userSchema), async (c) => {
     const { email, password } = c.req.valid("json");
     const db = drizzle(pool);
@@ -145,6 +144,53 @@ export const authRoute = new Hono()
         return c.json({ error: 'Login failed' }, 500);
     }
 })
+.post('/login-or-register', zValidator("json", userSchema), async (c) => {
+    const { email, password } = c.req.valid("json");
+    const db = drizzle(pool);
+    try {
+        let user = await db.select().from(users)
+            .where(eq(users.email, email));
+        if (user.length) {
+            // User exists, try login
+            if (!user[0].password) {
+                return c.json({ message: 'Contraseña no válida' }, 400);
+            }
+            const isMatch = await bcrypt.compare(password, user[0].password);
+            if (!isMatch) {
+                return c.json({ message: 'Contraseña incorrecta' }, 400);
+            }
+            const token = await createAccessToken({ id: user[0].id });
+            setCookie(c, 'token', token as string, {
+                path: '/',
+                sameSite: 'None',
+                secure: true,
+                maxAge: 7 * 24 * 60 * 60,
+            });
+            return c.json({ message: 'Inicio de sesión realizado con éxito', user }, 200);
+        } else {
+            // Register new user
+            const passwordHash = await bcrypt.hash(password, 10);
+            await db.insert(users).values({
+                email,
+                password: passwordHash,
+                createdAt: new Date()
+            });
+            const newUser = await db.select().from(users)
+                .where(eq(users.email, email))
+                .limit(1);
+            const token = await createAccessToken({ id: newUser[0].id });
+            setCookie(c, 'token', token as string, {
+                path: '/',
+                sameSite: 'None',
+                secure: true,
+                maxAge: 7 * 24 * 60 * 60,
+            });
+            return c.json({ message: 'Usuario registrado correctamente', user: newUser }, 200);
+        }
+    } catch (error: any) {
+        return c.json({ message: 'Error en login o registro'}, 400);
+    }
+})
 .get('/profile', async (c) => {
     try {     
         const token = getCookie(c, 'token');
@@ -174,7 +220,7 @@ export const authRoute = new Hono()
 .delete('/logout', async (c) => {
     deleteCookie(c, 'token');
     return c.json({ message: 'Logout successful' }, 200);
-})  
+})
 .get('/google', async (c) => {
     const state = crypto.randomBytes(16).toString('hex');
     setCookie(c, 'oauth_state', state, {
