@@ -110,22 +110,22 @@ paymentsRoute.post('/webhook', async (c) => {
         .where(eq(users.lastPreferenceId, preferenceId));
 
     if (user[0] && user[0].credits != null && !user[0].lastPreferencePaid && data?.status == "closed") {
-      if (credits == 150) {
+      if (credits == 120) {
         await db.update(users).set({
           credits: user[0].credits + 50,
           lastPreferencePaid: true,
         }).where(eq(users.lastPreferenceId, preferenceId));
-      } else if (credits == 1500) {
+      } else if (credits == 1200) {
         await db.update(users).set({
           credits: user[0].credits + 500,
           lastPreferencePaid: true,
         }).where(eq(users.lastPreferenceId, preferenceId));
-      } else if (credits == 6600) {
+      } else if (credits == 5280) {
         await db.update(users).set({
           credits: user[0].credits + 2500,
           lastPreferencePaid: true,
         }).where(eq(users.lastPreferenceId, preferenceId));
-      } else if (credits == 12750) {
+      } else if (credits == 10000) {
         await db.update(users).set({
           credits: user[0].credits + 5000,
           lastPreferencePaid: true,
