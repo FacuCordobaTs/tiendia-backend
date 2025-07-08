@@ -326,6 +326,12 @@ export const productsRoute = new Hono()
         includeModel: includeModel,
       };
 
+      if (credits[0] && credits[0].credits) { 
+        await db.update(users).set({
+          credits: credits[0].credits - 50,
+        }).where(eq(users.id, userId));
+      }
+
       const workerResponse = await requestQueue.enqueue(workerPayload, workerUrl);
       console.log(`Respuesta del worker recibida correctamente`);
 
@@ -342,12 +348,6 @@ export const productsRoute = new Hono()
           createdAt: new Date(),
         }).$returningId();
         console.log(`Registro insertado en tabla 'images' para producto ${id}, URL: ${adImageUrl}`);
-
-        if (credits[0] && credits[0].credits) { 
-          await db.update(users).set({
-            credits: credits[0].credits - 50,
-          }).where(eq(users.id, userId));
-        }
 
         return c.json({
           message: "Publicidad generada correctamente.",
@@ -636,6 +636,13 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
     mimeType: mimeType,
   };
 
+  if (credits[0] && credits[0].credits) { 
+    await db.update(users).set({
+      credits: credits[0].credits - 50,
+    })
+    .where(eq(users.id, userId))
+  }
+
   try {
     const nameResult = await requestQueue.enqueue(nameWorkerPayload, workerUrl);
     if (nameResult.generatedName) {
@@ -689,13 +696,6 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
       createdAt: new Date(),
     }).$returningId();
     imageId = result[0].id;
-  }
-
-  if (credits[0] && credits[0].credits) { 
-    await db.update(users).set({
-      credits: credits[0].credits - 50,
-    })
-    .where(eq(users.id, userId))
   }
   
   return c.json(
@@ -1430,6 +1430,12 @@ productsRoute.post("/personalize/:id", authMiddleware, zValidator("json", person
       ...personalizationParams
     };
 
+    if (credits[0] && credits[0].credits) { 
+      await db.update(users).set({
+        credits: credits[0].credits - 50,
+      }).where(eq(users.id, userId));
+    }
+
     console.log(`Enviando solicitud al worker para personalizar el producto ID: ${id}`);
     const workerResponse = await requestQueue.enqueue(workerPayload, workerUrl);
     console.log(`Respuesta del worker recibida correctamente`);
@@ -1447,12 +1453,6 @@ productsRoute.post("/personalize/:id", authMiddleware, zValidator("json", person
         createdAt: new Date(),
       }).$returningId();
       console.log(`Registro insertado en tabla 'images' para producto ${id}, URL: ${personalizedImageUrl}`);
-
-      if (credits[0] && credits[0].credits) { 
-        await db.update(users).set({
-          credits: credits[0].credits - 50,
-        }).where(eq(users.id, userId));
-      }
 
       return c.json({
         message: "Imagen personalizada generada correctamente.",
@@ -1569,6 +1569,13 @@ productsRoute.post("/back-image/:id", authMiddleware, zValidator("json", persona
       ...personalizationParams
     };
 
+
+    if (credits[0] && credits[0].credits) { 
+      await db.update(users).set({
+        credits: credits[0].credits - 50,
+      }).where(eq(users.id, userId));
+    }
+
     console.log(`Enviando solicitud al worker para generar vista trasera del producto ID: ${id}`);
     const workerResponse = await requestQueue.enqueue(workerPayload, workerUrl);
     console.log(`Respuesta del worker recibida correctamente`);
@@ -1586,12 +1593,6 @@ productsRoute.post("/back-image/:id", authMiddleware, zValidator("json", persona
         createdAt: new Date(),
       }).$returningId();
       console.log(`Registro insertado en tabla 'images' para producto ${id}, URL: ${backImageUrl}`);
-
-      if (credits[0] && credits[0].credits) { 
-        await db.update(users).set({
-          credits: credits[0].credits - 50,
-        }).where(eq(users.id, userId));
-      }
 
       return c.json({
         message: "Imagen de vista trasera generada correctamente.",
@@ -1708,6 +1709,12 @@ productsRoute.post("/baby-image/:id", authMiddleware, zValidator("json", persona
       ...personalizationParams
     };
 
+    if (credits[0] && credits[0].credits) { 
+      await db.update(users).set({
+        credits: credits[0].credits - 50,
+      }).where(eq(users.id, userId));
+    }
+    
     console.log(`Enviando solicitud al worker para generar vista de bebé del producto ID: ${id}`);
     const workerResponse = await requestQueue.enqueue(workerPayload, workerUrl);
     console.log(`Respuesta del worker recibida correctamente`);
@@ -1726,11 +1733,6 @@ productsRoute.post("/baby-image/:id", authMiddleware, zValidator("json", persona
       }).$returningId();
       console.log(`Registro insertado en tabla 'images' para producto ${id}, URL: ${babyImageUrl}`);
 
-      if (credits[0] && credits[0].credits) { 
-        await db.update(users).set({
-          credits: credits[0].credits - 50,
-        }).where(eq(users.id, userId));
-      }
 
       return c.json({
         message: "Imagen de bebé generada correctamente.",
