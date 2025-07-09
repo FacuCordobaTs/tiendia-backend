@@ -4,7 +4,7 @@ import { z } from "zod";
 import jwt, { JwtPayload } from "jsonwebtoken";
 import { getCookie } from "hono/cookie";
 import * as UUID from 'uuid';
-import { users } from "../db/schema";
+import { creditPurchases, users } from "../db/schema";
 import { drizzle } from "drizzle-orm/mysql2";
 import { pool } from "../db";
 import { eq } from "drizzle-orm";
@@ -115,23 +115,55 @@ paymentsRoute.post('/webhook', async (c) => {
           credits: user[0].credits + 50,
           lastPreferencePaid: true,
         }).where(eq(users.lastPreferenceId, preferenceId));
+
+        await db.insert(creditPurchases).values({
+          userId: user[0].id,
+          credits: 50,
+          priceArs: credits,
+          productsReferenceId: preferenceId,
+          createdAt: new Date(),
+        });
+
       } else if (credits == 1200 || credits == 1500) {
         await db.update(users).set({
           credits: user[0].credits + 500,
           lastPreferencePaid: true,
         }).where(eq(users.lastPreferenceId, preferenceId));
+
+        await db.insert(creditPurchases).values({
+          userId: user[0].id,
+          credits: 500,
+          priceArs: credits,
+          productsReferenceId: preferenceId,
+          createdAt: new Date(),
+        });
       } else if (credits == 5280 || credits == 6600) {
         await db.update(users).set({
           credits: user[0].credits + 2500,
           lastPreferencePaid: true,
         }).where(eq(users.lastPreferenceId, preferenceId));
+
+        await db.insert(creditPurchases).values({
+          userId: user[0].id,
+          credits: 2500,
+          priceArs: credits,
+          productsReferenceId: preferenceId,
+          createdAt: new Date(),
+        });
       } else if (credits == 10000 || credits == 12750) {
         await db.update(users).set({
           credits: user[0].credits + 5000,
           lastPreferencePaid: true,
         }).where(eq(users.lastPreferenceId, preferenceId));
+
+        await db.insert(creditPurchases).values({
+          userId: user[0].id,
+          credits: 5000,
+          priceArs: credits,
+          productsReferenceId: preferenceId,
+          createdAt: new Date(),
+        });
       }
-      
     }
 
     return c.json({ message: 'Webhook processed successfully' }, 200);
@@ -285,7 +317,14 @@ paymentsRoute.post('/webhook', async (c) => {
                 credits: user[0].credits + credits,
                 lastPreferencePaid: true,
             }).where(eq(users.lastPreferenceId, paymentDetails.order_id));
-            
+
+            await db.insert(creditPurchases).values({
+              userId: user[0].id,
+              credits: credits,
+              priceArs: paymentDetails.amount,
+              productsReferenceId: paymentDetails.order_id,
+              createdAt: new Date(),
+            });
             console.log(`dLocal: Added ${credits} credits to user ${user[0].id} for payment ${payment_id}`);
         }
   

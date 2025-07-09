@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { drizzle } from "drizzle-orm/mysql2";
 import { pool } from "../db";
-import { images, products, users } from "../db/schema";
+import { imageGenerations, images, products, users } from "../db/schema";
 import { authMiddleware } from "../middlewares/auth.middleware";
 import { eq, sql, like, notLike, and } from "drizzle-orm"; // Added 'and', removed like and notLike from previous comment
 import UUID from "uuid-js";
@@ -332,6 +332,12 @@ export const productsRoute = new Hono()
         }).where(eq(users.id, userId));
       }
 
+      await db.insert(imageGenerations).values({
+        userId: userId,
+        productId: id,
+        createdAt: new Date(),
+      });
+
       const workerResponse = await requestQueue.enqueue(workerPayload, workerUrl);
       console.log(`Respuesta del worker recibida correctamente`);
 
@@ -526,6 +532,18 @@ productsRoute.post("/images/modify/:imageId", authMiddleware, zValidator("json",
       prompt: prompt,
     };
 
+    await db.update(users).set({
+      credits: currentCredits - 100,
+    })
+    .where(eq(users.id, userId));
+
+
+    await db.insert(imageGenerations).values({
+      userId: userId,
+      productId: originalImage.productId,
+      createdAt: new Date(),
+    });
+
     const workerResponse = await requestQueue.enqueue(workerPayload, workerUrl);
     console.log(`Respuesta de modificación del worker recibida`);
 
@@ -550,11 +568,6 @@ productsRoute.post("/images/modify/:imageId", authMiddleware, zValidator("json",
         createdAt: new Date(),
       }).$returningId();
       console.log(`Registro insertado en tabla 'images' para imagen modificada, URL: ${modifiedImageUrl}`);
-
-      await db.update(users).set({
-        credits: currentCredits - 50,
-      })
-      .where(eq(users.id, userId));
 
       return c.json(
         {
@@ -643,6 +656,7 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
     .where(eq(users.id, userId))
   }
 
+
   try {
     const nameResult = await requestQueue.enqueue(nameWorkerPayload, workerUrl);
     if (nameResult.generatedName) {
@@ -687,6 +701,12 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
   }).$returningId();
 
   const productId = insertedProduct[0].id;
+
+  await db.insert(imageGenerations).values({
+    userId: userId,
+    productId: productId,
+    createdAt: new Date(),
+  });
 
   let imageId;
   if (generatedImageUrl) {
@@ -925,413 +945,6 @@ productsRoute.post("/upload-images", authMiddleware, async (c) => {
   }
 });
 
-productsRoute.post("/generate-pro/:id", authMiddleware, async (c) => {
-  const id = Number(c.req.param("id"));
-  const db = drizzle(pool);
-  const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-  const OPENAI_API_URL = 'https://api.openai.com/v1/images/edits';
-
-  if (!OPENAI_API_KEY) {
-    return c.json({ error: 'OpenAI API key not configured' }, 500);
-  }
-
-  const token = getCookie(c, 'token');
-  if (!token) return c.json({ error: 'Unauthorized' }, 401);
-
-  const decoded = await new Promise((resolve, reject) => {
-    jwt.verify(token, process.env.TOKEN_SECRET || 'my-secret', (error, decoded) => {
-      if (error) reject(error);
-      resolve(decoded);
-    });
-  });
-
-  const userId = (decoded as JwtPayload).id;
-
-  const credits = await db.select({
-    credits: users.credits,
-  })
-  .from(users)
-  .where(eq(users.id, userId));
-
-  if (credits && credits[0] && credits[0].credits && credits[0].credits < 100) {
-    return c.json({ message: "Creditos no suficientes" }, { status: 400 });
-  }
-
-  if (isNaN(id)) {
-    return c.json({ error: "ID de producto inválido" }, { status: 400 });
-  }
-
-  try {
-    const productResult = await db
-      .select({
-        imageURL: products.imageURL,
-      })
-      .from(products)
-      .where(eq(products.id, id))
-      .limit(1);
-
-    if (!productResult || productResult.length === 0) {
-      return c.json({ message: "Producto no encontrado" }, { status: 404 });
-    }
-    const product = productResult[0];
-
-    if (!product.imageURL) {
-      return c.json(
-        { message: "El producto no tiene una imagen para generar publicidad." },
-        { status: 400 }
-      );
-    }
-    const originalProductImageUrl = product.imageURL;
-
-    const originalImageName = product.imageURL.split("/").pop();
-    if (!originalImageName) {
-      console.error("No se pudo extraer el nombre de archivo de:", product.imageURL);
-      return c.json({ message: "Error al procesar la URL de la imagen original." }, { status: 500 });
-    }
-    
-    let originalImageBase64: string;
-    let originalMimeType: string;
-
-    try {
-      console.log(`Descargando imagen original desde R2: ${originalProductImageUrl}`);
-      const response = await fetch(originalProductImageUrl);
-      if (!response.ok) {
-        throw new Error(`Error HTTP ${response.status} al descargar imagen de R2`);
-      }
-      const contentTypeHeader = response.headers.get("content-type");
-
-      if (contentTypeHeader && ALLOWED_MIME_TYPES.includes(contentTypeHeader)) {
-        originalMimeType = contentTypeHeader;
-      } else {
-        const urlPath = new URL(originalProductImageUrl).pathname;
-        const extension = urlPath.split('.').pop()?.toLowerCase();
-        if (extension === "jpg" || extension === "jpeg") originalMimeType = "image/jpeg";
-        else if (extension === "png") originalMimeType = "image/png";
-        else if (extension === "webp") originalMimeType = "image/webp";
-        else { throw new Error("Tipo MIME desconocido o no permitido para la imagen original."); }
-        console.warn(`Usando MimeType ${originalMimeType} basado en extensión para ${originalProductImageUrl}`);
-      }
-
-      const imageBuffer = await response.arrayBuffer();
-      originalImageBase64 = Buffer.from(imageBuffer).toString("base64");
-      console.log(`Imagen original descargada de R2 y convertida a Base64 (${(originalImageBase64.length * 3/4 / 1024).toFixed(2)} KB)`);
-
-    } catch (fetchError: any) {
-      console.error(`Error al obtener/procesar la imagen original desde R2 (${originalProductImageUrl}):`, fetchError);
-      return c.json({ message: "Error crítico al acceder a la imagen original del producto." }, { status: 500 });
-    }
-
-    // Validate mime type
-    if (!['image/png', 'image/jpeg', 'image/webp'].includes(originalMimeType)) {
-      return c.json({ error: 'Invalid mime type. Must be image/png, image/jpeg, or image/webp.' }, 400);
-    }
-
-    // Check file size (25MB limit)
-    const imageBuffer = Buffer.from(originalImageBase64, 'base64');
-    if (imageBuffer.length > 25 * 1024 * 1024) {
-      return c.json({ error: 'Image size exceeds 25MB limit.' }, 400);
-    }
-
-    // Create a Blob-like object
-    const imageBlob = new Blob([imageBuffer], { type: originalMimeType });
-
-    const prompt = `Generate a fashion-forward, editorial-style image with these exact specifications:  
-  The clothing item must be worn by a model (male or female) with a bold, expressive pose that conveys confidence or attitude  
-  Model visibility: flexible – can include waist-up, full body, or dynamic crop depending on composition  
-  Pose and body angle must look like a candid or intentional street-style photo – dynamic, casual or confident  
-  Facial expression should feel natural or slightly aloof – model can look at the camera or away  
-  Lighting should mimic on-camera flash photography: harsh flash shadows, high contrast, slightly overexposed skin highlights  
-  Scene must resemble a real-life environment: urban backdrops (walls, streets, elevators, rooftops), daylight or nightlife  
-  Slight grain or imperfection to mimic analog/digital flash aesthetic  
-  Background can include tiled walls, elevators, skies, or street textures – no plain studio setups  
-  Fashion styling can include accessories like sunglasses, bags, or earrings if they match the look  
-  The image should feel like a mix of 90s/2000s Y2K, streetwear, or Instagram fashion influencer vibes  
-  Clothing and fabric must remain sharp and color-accurate despite the creative lighting  
-  High resolution, realistic depth, professional post-processing  
-  No graphic design elements, logos, or overlay text  
-  9:16 proportion`;
-
-    console.log(`Enviando solicitud a OpenAI para el producto ID: ${id}`);
-    const formData = new FormData();
-    formData.append('model', 'gpt-image-1');
-    formData.append('prompt', prompt);
-    formData.append('n', '1');
-    formData.append('size', '1024x1536');
-    formData.append('quality', 'high');
-    formData.append('image', imageBlob, 'image.' + originalMimeType.split('/')[1]);
-
-    const openaiResponse = await fetch(OPENAI_API_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: formData
-    });
-
-    if (!openaiResponse.ok) {
-      const errorBody = await openaiResponse.text();
-      console.error("Error from OpenAI API:", openaiResponse.status, errorBody);
-      return c.json({ 
-        error: "Failed to generate image from OpenAI", 
-        details: errorBody 
-      }, 500);
-    }
-
-    const result = await openaiResponse.json() as { 
-      created: number;
-      data: { b64_json: string }[];
-      usage: {
-        total_tokens: number;
-        input_tokens: number;
-        output_tokens: number;
-        input_tokens_details: {
-          text_tokens: number;
-          image_tokens: number;
-        };
-      };
-    };
-
-    if (!result.data?.[0]?.b64_json) {
-      throw new Error('No image data in OpenAI response');
-    }
-
-    const savedImageUrl = await saveImage(`data:${originalMimeType};base64,${result.data[0].b64_json}`);
-    console.log("Imagen generada guardada en:", savedImageUrl);
-
-    const dbResult = await db.insert(images).values({
-      url: savedImageUrl,
-      productId: id,
-      createdAt: new Date(),
-    }).$returningId();
-    console.log(`Registro insertado en tabla 'images' para producto ${id}, URL: ${savedImageUrl}`);
-
-    if (credits[0] && credits[0].credits) { 
-      await db.update(users).set({
-        credits: credits[0].credits - 100,
-      }).where(eq(users.id, userId));
-    }
-
-    return c.json({
-      message: "Publicidad generada correctamente.",
-      adImageUrl: savedImageUrl,
-      imageId: dbResult[0].id
-    }, { status: 200 });
-
-  } catch (error: any) {
-    console.error("Error en la ruta /generate-pro:", error);
-    const errorMessage = error.message || "Error interno del servidor al generar la publicidad.";
-    return c.json({ message: errorMessage }, { status: 500 });
-  }
-});
-
-// Add WebSocket endpoint for generate-pro
-
-productsRoute.get("/sse/generate-pro/:id", async (c) => {
-  console.log('🔌 New SSE connection request received');
-  
-  const headers = new Headers({
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Headers': 'Cache-Control'
-  });
-
-  const stream = new ReadableStream({
-    start(controller) {
-      const sendEvent = (data: any) => {
-        console.log('📤 Sending SSE event:', data);
-        const message = `data: ${JSON.stringify(data)}\n\n`;
-        controller.enqueue(new TextEncoder().encode(message));
-      };
-
-      const processRequest = async () => {
-        try {
-          const id = Number(c.req.param("id"));
-          console.log('🔄 Starting Pro generation process for product:', id);
-          
-          const db = drizzle(pool);
-          const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-          const OPENAI_API_URL = 'https://api.openai.com/v1/images/edits';
-
-          if (!OPENAI_API_KEY) {
-            console.error('❌ OpenAI API key not configured');
-            throw new Error('OpenAI API key not configured');
-          }
-
-          const token = getCookie(c, 'token');
-          if (!token) {
-            console.error('❌ No authentication token found');
-            throw new Error("Unauthorized");
-          }
-
-          console.log('🔑 Verifying user token');
-          const decoded = await new Promise((resolve, reject) => {
-            jwt.verify(token, process.env.TOKEN_SECRET || 'my-secret', (error, decoded) => {
-              if (error) reject(error);
-              else resolve(decoded);
-            });
-          });
-
-          const userId = (decoded as JwtPayload).id;
-          console.log('👤 User authenticated:', userId);
-
-          const credits = await db.select({ credits: users.credits })
-            .from(users)
-            .where(eq(users.id, userId));
-
-          if (!credits?.[0]?.credits || credits[0].credits < 100) {
-            console.error('❌ Insufficient credits:', credits?.[0]?.credits);
-            throw new Error("Créditos insuficientes");
-          }
-
-          if (isNaN(id)) {
-            console.error('❌ Invalid product ID:', id);
-            throw new Error("ID inválido");
-          }
-
-          sendEvent({ status: "processing", message: "Obteniendo producto..." });
-          console.log('📥 Fetching product details');
-
-          const productResult = await db
-            .select({ imageURL: products.imageURL })
-            .from(products)
-            .where(eq(products.id, id))
-            .limit(1);
-
-          const product = productResult[0];
-          if (!product || !product.imageURL) {
-            console.error('❌ Product not found or has no image:', { productId: id, hasImage: !!product?.imageURL });
-            throw new Error("Producto no encontrado o sin imagen");
-          }
-
-          sendEvent({ status: "processing", message: "Descargando imagen..." });
-          console.log('📥 Downloading product image');
-
-          const response = await fetch(product.imageURL);
-          if (!response.ok) {
-            console.error('❌ Failed to download image:', response.status);
-            throw new Error(`Error HTTP ${response.status} al descargar imagen`);
-          }
-
-          let mime = response.headers.get("content-type") || "";
-          if (!['image/png', 'image/jpeg', 'image/webp'].includes(mime)) {
-            const ext = product.imageURL.split('.').pop()?.toLowerCase();
-            if (ext === "jpg" || ext === "jpeg") mime = "image/jpeg";
-            else if (ext === "png") mime = "image/png";
-            else if (ext === "webp") mime = "image/webp";
-            else {
-              console.error('❌ Invalid mime type:', mime);
-              throw new Error("Tipo MIME no permitido");
-            }
-          }
-
-          const arrayBuf = await response.arrayBuffer();
-          const buffer = Buffer.from(arrayBuf);
-          
-          if (buffer.length > 25 * 1024 * 1024) {
-            console.error('❌ Image too large:', buffer.length);
-            throw new Error("Imagen mayor a 25MB");
-          }
-
-          const imageBlob = new Blob([buffer], { type: mime });
-
-          sendEvent({ status: "processing", message: "Generando imagen con IA..." });
-          console.log('🤖 Sending request to OpenAI');
-
-          const prompt = `Generate a fashion-forward, editorial-style image with these exact specifications:  
-          The clothing item must be worn by a model (male or female) with a bold, expressive pose that conveys confidence or attitude  
-          Model visibility: flexible – can include waist-up, full body, or dynamic crop depending on composition  
-          Pose and body angle must look like a candid or intentional street-style photo – dynamic, casual or confident  
-          Facial expression should feel natural or slightly aloof – model can look at the camera or away  
-          Lighting should mimic on-camera flash photography: harsh flash shadows, high contrast, slightly overexposed skin highlights  
-          Scene must resemble a real-life environment: urban backdrops (walls, streets, elevators, rooftops), daylight or nightlife  
-          Slight grain or imperfection to mimic analog/digital flash aesthetic  
-          Background can include tiled walls, elevators, skies, or street textures – no plain studio setups  
-          Fashion styling can include accessories like sunglasses, bags, or earrings if they match the look  
-          The image should feel like a mix of 90s/2000s Y2K, streetwear, or Instagram fashion influencer vibes  
-          Clothing and fabric must remain sharp and color-accurate despite the creative lighting  
-          High resolution, realistic depth, professional post-processing  
-          No graphic design elements, logos, or overlay text  
-          9:16 proportion`;
-
-          const formData = new FormData();
-          formData.append('model', 'gpt-image-1');
-          formData.append('prompt', prompt);
-          formData.append('n', '1');
-          formData.append('size', '1024x1536');
-          formData.append('quality', 'high');
-          formData.append('image', imageBlob, 'image.' + mime.split('/')[1]);
-
-          const openaiResponse = await fetch(OPENAI_API_URL, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${OPENAI_API_KEY}`,
-            },
-            body: formData
-          });
-
-          if (!openaiResponse.ok) {
-            const errorBody = await openaiResponse.text();
-            console.error('❌ OpenAI API error:', { status: openaiResponse.status, body: errorBody });
-            throw new Error(`OpenAI error: ${errorBody}`);
-          }
-
-          console.log('📥 Received response from OpenAI');
-          const result = await openaiResponse.json() as {
-            data: { b64_json: string }[];
-          };
-
-          const imageB64 = result.data?.[0]?.b64_json;
-          if (!imageB64) {
-            console.error('❌ No image data in OpenAI response');
-            throw new Error("No image data in response");
-          }
-
-          sendEvent({ status: "processing", message: "Guardando imagen..." });
-          console.log('💾 Saving generated image');
-
-          const savedImageUrl = await saveImage(`data:${mime};base64,${imageB64}`);
-          console.log('✅ Image saved successfully:', savedImageUrl);
-
-          const dbResult = await db.insert(images).values({
-            url: savedImageUrl,
-            productId: id,
-            createdAt: new Date(),
-          }).$returningId();
-          console.log('💾 Image record created in database:', dbResult[0].id);
-
-          await db.update(users).set({
-            credits: credits[0].credits - 100,
-          }).where(eq(users.id, userId));
-          console.log('💳 Updated user credits');
-
-          sendEvent({
-            status: "done",
-            imageUrl: savedImageUrl,
-            imageId: dbResult[0].id
-          });
-          console.log('✅ Pro generation completed successfully');
-
-        } catch (error: any) {
-          console.error('❌ Error in SSE process:', error);
-          sendEvent({
-            status: "error",
-            message: error.message || "Error inesperado"
-          });
-        } finally {
-          console.log('🏁 Closing SSE connection');
-          controller.close();
-        }
-      };
-
-      processRequest();
-    }
-  });
-
-  return new Response(stream, { headers });
-});
-
 productsRoute.post("/personalize/:id", authMiddleware, zValidator("json", personalizeSchema), async (c) => {
   const id = Number(c.req.param("id"));
   const db = drizzle(pool);
@@ -1435,6 +1048,12 @@ productsRoute.post("/personalize/:id", authMiddleware, zValidator("json", person
         credits: credits[0].credits - 50,
       }).where(eq(users.id, userId));
     }
+
+    await db.insert(imageGenerations).values({
+      userId: userId,
+      productId: id,
+      createdAt: new Date(),
+    });
 
     console.log(`Enviando solicitud al worker para personalizar el producto ID: ${id}`);
     const workerResponse = await requestQueue.enqueue(workerPayload, workerUrl);
@@ -1576,6 +1195,12 @@ productsRoute.post("/back-image/:id", authMiddleware, zValidator("json", persona
       }).where(eq(users.id, userId));
     }
 
+    await db.insert(imageGenerations).values({
+      userId: userId,
+      productId: id,
+      createdAt: new Date(),
+    });
+
     console.log(`Enviando solicitud al worker para generar vista trasera del producto ID: ${id}`);
     const workerResponse = await requestQueue.enqueue(workerPayload, workerUrl);
     console.log(`Respuesta del worker recibida correctamente`);
@@ -1715,6 +1340,12 @@ productsRoute.post("/baby-image/:id", authMiddleware, zValidator("json", persona
       }).where(eq(users.id, userId));
     }
     
+    await db.insert(imageGenerations).values({
+      userId: userId,
+      productId: id,
+      createdAt: new Date(),
+    });
+
     console.log(`Enviando solicitud al worker para generar vista de bebé del producto ID: ${id}`);
     const workerResponse = await requestQueue.enqueue(workerPayload, workerUrl);
     console.log(`Respuesta del worker recibida correctamente`);
