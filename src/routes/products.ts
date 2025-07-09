@@ -875,6 +875,18 @@ productsRoute.post("/upload-images", authMiddleware, async (c) => {
     return c.json({ message: "Usuario no autenticado" }, 401);
   }
 
+
+  const credits = await db.select({
+    credits: users.credits,
+  })
+  .from(users)
+  .where(eq(users.id, userId));
+
+  if (!credits || !credits[0] || !credits[0].credits || credits[0].credits < 50) {
+    return c.json({ message: "Creditos no suficientes" }, { status: 400 });
+  }
+
+
   try {
     const formData = await c.req.formData();
     const files = formData.getAll('images') as File[];
