@@ -303,13 +303,13 @@ paymentsRoute.post('/webhook', async (c) => {
   
         if (user[0] && user[0].credits != null && !user[0].lastPreferencePaid && paymentDetails.status === 'PAID') {
             let credits = 0;
-            if (paymentDetails.amount == 0.125) {
+            if (paymentDetails.amount >= 0 && paymentDetails.amount < 1) {
               credits = 50;
-            } else if (paymentDetails.amount == 1.25) {
+            } else if (paymentDetails.amount >= 1 && paymentDetails.amount <= 4) {
               credits = 500;
-            } else if (paymentDetails.amount == 5.5) {
+            } else if (paymentDetails.amount >= 5 && paymentDetails.amount <= 10) {
               credits = 2500;
-            } else if (paymentDetails.amount == 10.625) {
+            } else if (paymentDetails.amount >= 10) {
               credits = 5000;
             }
 
