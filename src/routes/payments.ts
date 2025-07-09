@@ -321,7 +321,7 @@ paymentsRoute.post('/webhook', async (c) => {
             await db.insert(creditPurchases).values({
               userId: user[0].id,
               credits: credits,
-              priceArs: paymentDetails.amount,
+              priceArs: paymentDetails.amount * 1200,
               productsReferenceId: paymentDetails.order_id,
               createdAt: new Date(),
             });
