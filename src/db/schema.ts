@@ -10,6 +10,10 @@ export const users = mysqlTable("users", {
     lastPreferenceId: varchar("last_preference_id", { length: 255 }),
     lastPreferencePaid: boolean("last_preference_paid").default(false),
     suscriptionId: varchar("suscription_id", { length: 255 }),
+    imageUrl: varchar("image_url", { length: 255 }),
+    name: varchar("name", { length: 255 }),
+    username: varchar("username", { length: 255 }).unique(),
+    phone: varchar("phone", { length: 255 }),
 });
 
 export const products = mysqlTable("products", {
@@ -18,6 +22,8 @@ export const products = mysqlTable("products", {
     imageURL: varchar("image_url", { length: 255 }),
     createdAt: timestamp("created_at").notNull(),
     createdById: int("createdById").references(() => users.id),
+    price: int("price"),
+    sizes: text("sizes"),
 });
 
 export const images = mysqlTable("images", {

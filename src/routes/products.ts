@@ -241,7 +241,7 @@ export const productsRoute = new Hono()
     .from(users)
     .where(eq(users.id, userId));
 
-    if (credits && credits[0] && credits[0].credits && credits[0].credits < 50) {
+    if (!credits || !credits[0] || !credits[0].credits || credits[0].credits < 50) {
       return c.json({ message: "Creditos no suficientes" }, { status: 400 });
     }
     if (isNaN(id)) {
@@ -620,7 +620,7 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
   .from(users)
   .where(eq(users.id, userId))
 
-  if (credits[0].credits && credits[0].credits < 50) {
+  if (!credits || !credits[0] || !credits[0].credits || credits[0].credits < 50) {
     return c.json({ message: "Creditos no suficientes" }, { status: 400 });
   }
 
@@ -968,7 +968,7 @@ productsRoute.post("/personalize/:id", authMiddleware, zValidator("json", person
   .from(users)
   .where(eq(users.id, userId));
 
-  if (credits && credits[0] && credits[0].credits && credits[0].credits < 50) {
+  if (!credits || !credits[0] || !credits[0].credits || credits[0].credits < 50) {
     return c.json({ message: "Creditos no suficientes" }, { status: 400 });
   }
 
@@ -1113,7 +1113,7 @@ productsRoute.post("/back-image/:id", authMiddleware, zValidator("json", persona
   .from(users)
   .where(eq(users.id, userId));
 
-  if (credits && credits[0] && credits[0].credits && credits[0].credits < 50) {
+  if (!credits || !credits[0] || !credits[0].credits || credits[0].credits < 50) {
     return c.json({ message: "Creditos no suficientes" }, { status: 400 });
   }
 
@@ -1259,7 +1259,7 @@ productsRoute.post("/baby-image/:id", authMiddleware, zValidator("json", persona
   .from(users)
   .where(eq(users.id, userId));
 
-  if (credits && credits[0] && credits[0].credits && credits[0].credits < 50) {
+  if (!credits || !credits[0] || !credits[0].credits || credits[0].credits < 50) {
     return c.json({ message: "Creditos no suficientes" }, { status: 400 });
   }
 
