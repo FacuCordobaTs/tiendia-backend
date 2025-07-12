@@ -195,6 +195,10 @@ paymentsRoute.post('/webhook', async (c) => {
             "success_url": "https://my.tiendia.app/home",
             "notification_url": "https://api.tiendia.app/api/payments/dlocal-webhook"
         };
+
+        console.log('dLocal payment payload:', JSON.stringify(dLocalPayment, null, 2));
+        console.log('dLocal API Key:', DLOCAL_API_KEY ? 'Present' : 'Missing');
+        console.log('dLocal Secret Key:', DLOCAL_SECRET_KEY ? 'Present' : 'Missing');
   
         const response = await fetch(`https://api.dlocalgo.com/v1/payments`, {
             method: 'POST',
@@ -206,7 +210,11 @@ paymentsRoute.post('/webhook', async (c) => {
         });
   
         if (!response.ok) {
-            throw new Error(`dLocal API error: ${response.status}`);
+            const errorText = await response.text();
+            console.error('dLocal API error response:', errorText);
+            console.error('dLocal API status:', response.status);
+            console.error('dLocal API headers:', Object.fromEntries(response.headers.entries()));
+            throw new Error(`dLocal API error: ${response.status} - ${errorText}`);
         }
   
         const paymentData = await response.json() as { order_id: string, redirect_url: string };
