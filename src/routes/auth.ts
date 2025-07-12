@@ -19,6 +19,7 @@ import crypto from 'crypto';
 import { authMiddleware } from '../middlewares/auth.middleware';
 import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
 import { Buffer } from 'buffer';
+import { products } from '../db/schema';
 
 // --- Configuración del Cliente S3 (R2) ---
 const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
@@ -481,6 +482,51 @@ export const authRoute = new Hono()
     } catch (error: any) {
         console.error("Error en la ruta /mi-tiendia:", error);
         return c.json({ error: 'Error al crear la tienda' }, 500);
+    }
+})
+.get('/store/:username', async (c) => {
+    const username = c.req.param('username');
+    const db = drizzle(pool);
+    
+    try {
+        // Get user by username
+        const user = await db.select().from(users)
+            .where(eq(users.username, username))
+            .limit(1);
+
+        if (!user.length) {
+            return c.json({ error: 'Esta página no existe' }, 404);
+        }
+
+        // Check if user has paid for MiTiendia
+        if (!user[0].paidMiTienda) {
+            return c.json({ error: 'Esta página no existe' }, 404);
+        }
+
+        // Get user's products
+        const userProducts = await db.select({
+            id: products.id,
+            name: products.name,
+            imageURL: products.imageURL,
+            price: products.price,
+            sizes: products.sizes,
+        })
+        .from(products)
+        .where(eq(products.createdById, user[0].id));
+
+        return c.json({
+            store: {
+                name: user[0].name,
+                username: user[0].username,
+                phone: user[0].phone,
+                imageUrl: user[0].imageUrl,
+            },
+            products: userProducts
+        }, 200);
+
+    } catch (error: any) {
+        console.error("Error en la ruta /store/:username:", error);
+        return c.json({ error: 'Error interno del servidor' }, 500);
     }
 });
 

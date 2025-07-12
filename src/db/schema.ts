@@ -43,8 +43,22 @@ export const creditPurchases = mysqlTable("credit_purchases", {
     productsReferenceId: varchar("preference_id", { length: 255 }),
     createdAt: timestamp("created_at").defaultNow(),
 });
+
+export const transactions = mysqlTable("transactions", {
+    id: int("id").primaryKey().autoincrement(),
+    userId: int("user_id").notNull().references(() => users.id),
+    orderId: varchar("order_id", { length: 255 }).notNull().unique(),
+    amount: int("amount").notNull(), // Amount in cents
+    currency: varchar("currency", { length: 10 }).notNull(),
+    creditsToAdd: int("credits_to_add").notNull(), // Amount of credits to be awarded
+    status: varchar("status", { length: 50 }).notNull().default("pending"),
+    paymentProvider: varchar("payment_provider", { length: 50 }).notNull(), // "mercadopago" or "dlocal"
+    processed: boolean("processed").default(false),
+    createdAt: timestamp("created_at").defaultNow(),
+    processedAt: timestamp("processed_at"),
+});
   
-  export const imageGenerations = mysqlTable("image_generations", {
+export const imageGenerations = mysqlTable("image_generations", {
     id: int("id").primaryKey().autoincrement(),
     userId: int("user_id").notNull().references(() => users.id),
     productId: int("product_id").references(() => products.id),

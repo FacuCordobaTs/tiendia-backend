@@ -4,7 +4,7 @@ import { z } from "zod";
 import jwt, { JwtPayload } from "jsonwebtoken";
 import { getCookie } from "hono/cookie";
 import * as UUID from 'uuid';
-import { creditPurchases, users } from "../db/schema";
+import { users, transactions } from "../db/schema";
 import { drizzle } from "drizzle-orm/mysql2";
 import { pool } from "../db";
 import { eq } from "drizzle-orm";
@@ -45,6 +45,20 @@ paymentsRoute.post("/create-preference", zValidator("json",creditSchema), async 
         });
     });
 
+    const orderId = UUID.v4();
+
+    // Calculate credits to add based on payment amount
+    let creditsToAdd = 0;
+    if (credits == 120) {
+        creditsToAdd = 50;
+    } else if (credits == 1200) {
+        creditsToAdd = 500;
+    } else if (credits == 5280) {
+        creditsToAdd = 2500;
+    } else if (credits == 10000) {
+        creditsToAdd = 5000;
+    }
+
     const response = await fetch('https://api.mercadopago.com/checkout/preferences', {
       method: 'POST',
       headers: {
@@ -67,12 +81,24 @@ paymentsRoute.post("/create-preference", zValidator("json",creditSchema), async 
         },
         notification_url: "https://api.tiendia.app/api/payments/webhook",
         statement_descriptor: "Carga de imagen",
-        external_reference: UUID.v4()
+        external_reference: orderId
       }),
     });
     const preference = await response.json() as { id: string };
 
     if (preference && preference.id) {
+      // Store transaction with calculated credits
+      await db.insert(transactions).values({
+        userId: (decoded as JwtPayload).id,
+        orderId: orderId,
+        amount: credits * 100, // Convert to cents
+        currency: "ARS",
+        creditsToAdd: creditsToAdd,
+        paymentProvider: "mercadopago",
+        status: "pending"
+      });
+
+      // Update user's lastPreferenceId for backward compatibility
       await db.update(users).set({
         lastPreferenceId: preference.id,
         lastPreferencePaid: false,
@@ -103,66 +129,28 @@ paymentsRoute.post('/webhook', async (c) => {
 
     const data = await response.json() as { items: { id: string, title: string, unit_price: number, quantity: number }[], preference_id: string, status: string };
 
-    const credits = data.items[0].unit_price;
     const preferenceId = data.preference_id;
 
-    const user = await db.select().from(users)
-        .where(eq(users.lastPreferenceId, preferenceId));
+    // Find transaction by preference_id
+    const transaction = await db.select().from(transactions)
+        .where(eq(transactions.orderId, preferenceId));
 
-    if (user[0] && user[0].credits != null && !user[0].lastPreferencePaid && data?.status == "closed") {
-      if (credits == 120 || credits == 150) {
+    if (transaction[0] && !transaction[0].processed && data?.status == "closed") {
+      const user = await db.select().from(users)
+          .where(eq(users.id, transaction[0].userId));
+
+      if (user[0] && user[0].credits != null && transaction[0].creditsToAdd > 0) {
         await db.update(users).set({
-          credits: user[0].credits + 50,
-          lastPreferencePaid: true,
-        }).where(eq(users.lastPreferenceId, preferenceId));
+          credits: user[0].credits + transaction[0].creditsToAdd,
+        }).where(eq(users.id, transaction[0].userId));
 
-        await db.insert(creditPurchases).values({
-          userId: user[0].id,
-          credits: 50,
-          priceArs: credits,
-          productsReferenceId: preferenceId,
-          createdAt: new Date(),
-        });
+        await db.update(transactions).set({
+          status: "completed",
+          processed: true,
+          processedAt: new Date()
+        }).where(eq(transactions.id, transaction[0].id));
 
-      } else if (credits == 1200 || credits == 1500) {
-        await db.update(users).set({
-          credits: user[0].credits + 500,
-          lastPreferencePaid: true,
-        }).where(eq(users.lastPreferenceId, preferenceId));
-
-        await db.insert(creditPurchases).values({
-          userId: user[0].id,
-          credits: 500,
-          priceArs: credits,
-          productsReferenceId: preferenceId,
-          createdAt: new Date(),
-        });
-      } else if (credits == 5280 || credits == 6600) {
-        await db.update(users).set({
-          credits: user[0].credits + 2500,
-          lastPreferencePaid: true,
-        }).where(eq(users.lastPreferenceId, preferenceId));
-
-        await db.insert(creditPurchases).values({
-          userId: user[0].id,
-          credits: 2500,
-          priceArs: credits,
-          productsReferenceId: preferenceId,
-          createdAt: new Date(),
-        });
-      } else if (credits == 10000 || credits == 12750) {
-        await db.update(users).set({
-          credits: user[0].credits + 5000,
-          lastPreferencePaid: true,
-        }).where(eq(users.lastPreferenceId, preferenceId));
-
-        await db.insert(creditPurchases).values({
-          userId: user[0].id,
-          credits: 5000,
-          priceArs: credits,
-          productsReferenceId: preferenceId,
-          createdAt: new Date(),
-        });
+        console.log(`MercadoPago: Added ${transaction[0].creditsToAdd} credits to user ${user[0].id} for payment ${preferenceId}`);
       }
     }
 
@@ -189,6 +177,18 @@ paymentsRoute.post('/webhook', async (c) => {
         });
 
         const orderId = UUID.v4();
+
+        // Calculate credits to add based on payment amount
+        let creditsToAdd = 0;
+        if (credits == 0.125) {
+            creditsToAdd = 50;
+        } else if (credits == 1.25) {
+            creditsToAdd = 500;
+        } else if (credits == 5.5) {
+            creditsToAdd = 2500;
+        } else if (credits == 10.625) {
+            creditsToAdd = 5000;
+        }
   
         // Crear pago en dLocal
         const dLocalPayment = {
@@ -200,7 +200,7 @@ paymentsRoute.post('/webhook', async (c) => {
             "notification_url": "https://api.tiendia.app/api/payments/dlocal-webhook"
         };
   
-        const response = await fetch(`https://api.dlocalgo.com/v1/payments`, {
+        const response = await fetch(`https://api-sbx.dlocalgo.com/v1/payments`, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${DLOCAL_API_KEY}:${DLOCAL_SECRET_KEY}`,
@@ -215,7 +215,18 @@ paymentsRoute.post('/webhook', async (c) => {
   
         const paymentData = await response.json() as { order_id: string, redirect_url: string };
   
-        // Guardar referencia del pago en la base de datos
+        // Store transaction with calculated credits
+        await db.insert(transactions).values({
+          userId: decoded.id,
+          orderId: paymentData.order_id,
+          amount: Math.round(credits * 100), // Convert to cents
+          currency: "USD",
+          creditsToAdd: creditsToAdd,
+          paymentProvider: "dlocal",
+          status: "pending"
+        });
+
+        // Update user's lastPreferenceId for backward compatibility
         await db.update(users).set({
             lastPreferenceId: paymentData.order_id,
             lastPreferencePaid: false,
@@ -282,7 +293,7 @@ paymentsRoute.post('/webhook', async (c) => {
         console.log('Processing dLocal notification for payment:', payment_id);
   
         // Obtener el estado actualizado del pago desde dLocal
-        const paymentResponse = await fetch(`https://api.dlocalgo.com/v1/payments/${payment_id}`, {
+        const paymentResponse = await fetch(`https://api-sbx.dlocalgo.com/v1/payments/${payment_id}`, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${DLOCAL_API_KEY}:${DLOCAL_SECRET_KEY}`,
@@ -297,35 +308,50 @@ paymentsRoute.post('/webhook', async (c) => {
         const paymentDetails = await paymentResponse.json() as { status: string, amount: number, order_id: string };
         const db = drizzle(pool);
         console.log(paymentDetails)
-        // Buscar el usuario por el payment_id
-        const user = await db.select().from(users)
-            .where(eq(users.lastPreferenceId, paymentDetails.order_id));
-  
-        if (user[0] && user[0].credits != null && !user[0].lastPreferencePaid && paymentDetails.status === 'PAID') {
-            let credits = 0;
-            if (paymentDetails.amount >= 0 && paymentDetails.amount < 1) {
-              credits = 50;
-            } else if (paymentDetails.amount >= 1 && paymentDetails.amount <= 4) {
-              credits = 500;
-            } else if (paymentDetails.amount >= 5 && paymentDetails.amount <= 10) {
-              credits = 2500;
-            } else if (paymentDetails.amount >= 10) {
-              credits = 5000;
+        
+        // Find transaction by order_id
+        const transaction = await db.select().from(transactions)
+            .where(eq(transactions.orderId, paymentDetails.order_id));
+        
+        console.log('Transaction lookup result:', transaction);
+        console.log('Looking for order_id:', paymentDetails.order_id);
+        console.log('Transaction found:', transaction.length > 0);
+        
+        if (transaction[0] && !transaction[0].processed && paymentDetails.status === 'PAID') {
+            const user = await db.select().from(users)
+                .where(eq(users.id, transaction[0].userId));
+
+            if (user[0] && user[0].credits != null) {
+                // Handle MiTiendia payment (2 USD)
+                if (paymentDetails.amount == 2) {
+                  await db.update(users).set({
+                    paidMiTienda: true,
+                    paidMiTiendaDate: new Date(),
+                  }).where(eq(users.id, transaction[0].userId));
+
+                  await db.update(transactions).set({
+                    status: "completed",
+                    processed: true,
+                    processedAt: new Date()
+                  }).where(eq(transactions.id, transaction[0].id));
+
+                  console.log(`dLocal MiTiendia: User ${user[0].id} paid for MiTiendia service`);
+                }
+                // Handle credit purchases using stored creditsToAdd value
+                else if (transaction[0].creditsToAdd > 0) {
+                  await db.update(users).set({
+                      credits: user[0].credits + transaction[0].creditsToAdd,
+                  }).where(eq(users.id, transaction[0].userId));
+
+                  await db.update(transactions).set({
+                    status: "completed",
+                    processed: true,
+                    processedAt: new Date()
+                  }).where(eq(transactions.id, transaction[0].id));
+
+                  console.log(`dLocal: Added ${transaction[0].creditsToAdd} credits to user ${user[0].id} for payment ${payment_id}`);
+                }
             }
-
-            await db.update(users).set({
-                credits: user[0].credits + credits,
-                lastPreferencePaid: true,
-            }).where(eq(users.lastPreferenceId, paymentDetails.order_id));
-
-            await db.insert(creditPurchases).values({
-              userId: user[0].id,
-              credits: credits,
-              priceArs: paymentDetails.amount * 1200,
-              productsReferenceId: paymentDetails.order_id,
-              createdAt: new Date(),
-            });
-            console.log(`dLocal: Added ${credits} credits to user ${user[0].id} for payment ${payment_id}`);
         }
   
         // Responder con 200 OK para confirmar la recepción
