@@ -18,7 +18,6 @@ const creditSchema = z.object({
     credits: z.number(),
 });
 
-// Configuración de dLocal
 const DLOCAL_SECRET_KEY = process.env.DLOCAL_SECRET_KEY!;
 const DLOCAL_API_KEY = process.env.DLOCAL_API_KEY!;
 
