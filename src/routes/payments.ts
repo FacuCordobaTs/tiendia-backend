@@ -45,8 +45,6 @@ paymentsRoute.post("/create-preference", zValidator("json",creditSchema), async 
         });
     });
 
-    const orderId = UUID.v4();
-
     // Calculate credits to add based on payment amount
     let creditsToAdd = 0;
     if (credits == 120) {
@@ -81,7 +79,6 @@ paymentsRoute.post("/create-preference", zValidator("json",creditSchema), async 
         },
         notification_url: "https://api.tiendia.app/api/payments/webhook",
         statement_descriptor: "Carga de imagen",
-        external_reference: orderId
       }),
     });
     const preference = await response.json() as { id: string };
@@ -90,8 +87,8 @@ paymentsRoute.post("/create-preference", zValidator("json",creditSchema), async 
       // Store transaction with calculated credits
       await db.insert(transactions).values({
         userId: (decoded as JwtPayload).id,
-        orderId: orderId,
-        amount: credits * 100, // Convert to cents
+        orderId: preference.id,
+        amount: credits, // Convert to cents
         currency: "ARS",
         creditsToAdd: creditsToAdd,
         paymentProvider: "mercadopago",
@@ -219,7 +216,7 @@ paymentsRoute.post('/webhook', async (c) => {
         await db.insert(transactions).values({
           userId: decoded.id,
           orderId: paymentData.order_id,
-          amount: Math.round(credits * 100), // Convert to cents
+          amount: Math.round(credits * 1200), // Convert to cents
           currency: "USD",
           creditsToAdd: creditsToAdd,
           paymentProvider: "dlocal",
