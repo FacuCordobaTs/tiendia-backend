@@ -14,23 +14,92 @@ import { users } from '../db/schema';
 import bcrypt from "bcryptjs";
 import { createAccessToken } from "../libs/jwt";
 import UUID from 'uuid-js';
-import { writeFile, unlink } from "fs/promises";
-import { join } from "path";
 import { OAuth2Client } from 'google-auth-library';
 import crypto from 'crypto';
 import { authMiddleware } from '../middlewares/auth.middleware';
+import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3";
+import { Buffer } from 'buffer';
 
-const UPLOAD_DIR = join(process.cwd(), 'public', 'uploads');
+// --- Configuración del Cliente S3 (R2) ---
+const R2_ACCOUNT_ID = process.env.R2_ACCOUNT_ID;
+const R2_ACCESS_KEY_ID = process.env.R2_ACCESS_KEY_ID;
+const R2_SECRET_ACCESS_KEY = process.env.R2_SECRET_ACCESS_KEY;
+const R2_BUCKET_NAME = process.env.R2_BUCKET_NAME;
+const R2_PUBLIC_URL = process.env.R2_PUBLIC_URL?.replace(/\/$/, ''); // Asegura que no termine con /
 
-// Funciones de manejo de imágenes (sin cambios)
+if (!R2_ACCOUNT_ID || !R2_ACCESS_KEY_ID || !R2_SECRET_ACCESS_KEY || !R2_BUCKET_NAME || !R2_PUBLIC_URL) {
+  console.error("FATAL ERROR: Faltan variables de entorno de Cloudflare R2. La aplicación no puede manejar imágenes.");
+  process.exit(1);
+}
+
+const s3Client = new S3Client({
+  region: "auto",
+  endpoint: `https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+  credentials: {
+    accessKeyId: R2_ACCESS_KEY_ID,
+    secretAccessKey: R2_SECRET_ACCESS_KEY,
+  },
+});
+
+// Funciones de manejo de imágenes con R2
 async function saveImage(base64String: string): Promise<string> {
-    const base64Data = base64String.replace(/^data:image\/\w+;base64,/, "");
-    const buffer = Buffer.from(base64Data, 'base64');
-    const uuid = UUID.create().toString();
-    const fileName = `${uuid}.png`;
-    const filePath = join(UPLOAD_DIR, fileName);
-    await writeFile(filePath, buffer);
-    return `/uploads/${fileName}`;
+  const match = base64String.match(/^data:(image\/\w+);base64,/);
+  if (!match) {
+      throw new Error('Formato de base64 inválido para saveImage');
+  }
+  const mimeType = match[1];
+  const fileExtension = mimeType.split('/')[1] || 'png'; // Extrae extensión
+
+  const base64Data = base64String.replace(/^data:image\/\w+;base64,/, "");
+  const buffer = Buffer.from(base64Data, "base64");
+
+  const uuid = UUID.create().toString();
+  const fileName = `${uuid}.${fileExtension}`; // Nombre del objeto en R2
+
+  const command = new PutObjectCommand({
+    Bucket: R2_BUCKET_NAME,
+    Key: fileName,
+    Body: buffer,
+    ContentType: mimeType,
+  });
+
+  try {
+    await s3Client.send(command);
+    const publicUrl = `${R2_PUBLIC_URL}/${fileName}`; // Construye la URL pública completa
+    console.log(`Imagen guardada en R2: ${publicUrl}`);
+    return publicUrl;
+  } catch (error) {
+    console.error(`Error al subir ${fileName} a R2:`, error);
+    throw new Error("Error al guardar la imagen en el almacenamiento en la nube.");
+  }
+}
+
+async function deleteImage(imageUrl: string): Promise<void> {
+  if (!imageUrl || !imageUrl.startsWith(R2_PUBLIC_URL!)) {
+    console.warn("deleteImage: URL inválida o no pertenece a R2 gestionado:", imageUrl);
+    return;
+  }
+  try {
+    const urlObject = new URL(imageUrl);
+    const key = urlObject.pathname.substring(1); // Extrae la 'Key' (path sin / inicial)
+
+    if (!key) {
+      console.warn("deleteImage: No se pudo extraer la clave de la URL R2:", imageUrl);
+      return;
+    }
+
+    const command = new DeleteObjectCommand({
+      Bucket: R2_BUCKET_NAME,
+      Key: key,
+    });
+
+    console.log(`Eliminando objeto ${key} de R2 bucket ${R2_BUCKET_NAME}...`);
+    await s3Client.send(command);
+    console.log(`Objeto ${key} eliminado de R2.`);
+
+  } catch (error: any) {
+     console.error(`Error al eliminar objeto de R2 (${imageUrl}):`, error);
+  }
 }
 
 async function updateImage(oldUrl: string, newBase64: string): Promise<string> {
@@ -45,23 +114,6 @@ const googleClient = new OAuth2Client(
     process.env.GOOGLE_REDIRECT_URI
 );
 
-async function deleteImage(imageUrl: string): Promise<void> {
-    try {
-        const fileName = imageUrl.split("/").pop();
-        if (!fileName) {
-            console.warn("URL de imagen inválida:", imageUrl);
-            return;
-        }
-        const filePath = join(UPLOAD_DIR, fileName);
-        await unlink(filePath);
-    } catch (error: any) {
-        if (error.code === "ENOENT") {
-            console.warn("Imagen no encontrada:", imageUrl);
-        } else {
-            console.error("Error al eliminar la imagen:", error);
-        }
-    }
-}
 
 // Esquemas de validación
 const userSchema = z.object({
@@ -371,6 +423,11 @@ export const authRoute = new Hono()
 
         const userId = (decoded as JwtPayload).id;
         
+        // Get current user data to check for existing logo
+        const currentUser = await db.select().from(users)
+            .where(eq(users.id, userId))
+            .limit(1);
+        
         // Generate store URL from store name
         const storeUrl = storeName
             .toLowerCase()
@@ -381,8 +438,13 @@ export const authRoute = new Hono()
         let logoUrl: string | undefined;
         if (storeLogo) {
             try {
+                // If user already has a logo, delete the old one first
+                if (currentUser[0]?.imageUrl) {
+                    await deleteImage(currentUser[0].imageUrl);
+                }
+                
                 logoUrl = await saveImage(storeLogo);
-                console.log("Logo guardado en:", logoUrl);
+                console.log("Logo guardado en R2:", logoUrl);
             } catch (error) {
                 console.error("Error al guardar el logo:", error);
                 return c.json({ error: 'Error al procesar el logo' }, 400);
@@ -394,7 +456,7 @@ export const authRoute = new Hono()
             name: storeName, // Use existing name field for store name
             username: storeUrl, // Use existing username field for store URL
             phone: phoneNumber, // Use existing phone field
-            imageUrl: logoUrl, // Use existing imageUrl field for store logo
+            imageUrl: logoUrl || currentUser[0]?.imageUrl, // Keep existing logo if no new one provided
             paidMiTienda: true, // Use existing paidMiTienda field
             paidMiTiendaDate: new Date(), // Use existing paidMiTiendaDate field
         }).where(eq(users.id, userId));
@@ -409,7 +471,7 @@ export const authRoute = new Hono()
             store: {
                 name: storeName,
                 url: storeUrl,
-                logoUrl: logoUrl,
+                logoUrl: logoUrl || currentUser[0]?.imageUrl,
                 phoneNumber: phoneNumber,
                 countryCode: countryCode
             },

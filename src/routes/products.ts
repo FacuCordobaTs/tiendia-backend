@@ -225,6 +225,8 @@ export const productsRoute = new Hono()
           name: products.name,
           imageURL: products.imageURL,
           createdAt: products.createdAt,
+          price: products.price,
+          sizes: products.sizes,
         })
         .from(products)
         .where(eq(products.createdById, Number(id)));
