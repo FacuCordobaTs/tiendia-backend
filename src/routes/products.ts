@@ -117,6 +117,26 @@ const personalizeSchema = z.object({
   bodyType: z.enum(['slim', 'athletic', 'curvy']).optional()
 });
 
+const productPricingSchema = z.object({
+  productId: z.number(),
+  price: z.number().min(0),
+  sizes: z.array(z.object({
+    name: z.string().min(1),
+    stock: z.number().min(0)
+  })).optional()
+});
+
+const updateProductPricingSchema = z.object({
+  products: z.array(z.object({
+    id: z.number(),
+    price: z.number().min(0).optional(),
+    sizes: z.array(z.object({
+      name: z.string().min(1),
+      stock: z.number().min(0)
+    })).optional()
+  }))
+});
+
 export const productsRoute = new Hono()
   .put("/update", zValidator("json", updateProductSchema), async (c) => {
     try {
@@ -1391,6 +1411,92 @@ productsRoute.post("/baby-image/:id", authMiddleware, zValidator("json", persona
     console.error("Error en la ruta /baby-image:", error);
     const errorMessage = error.message || "Error interno del servidor al generar la imagen de bebé.";
     return c.json({ message: errorMessage }, { status: 500 });
+  }
+});
+
+productsRoute.post("/update-pricing", authMiddleware, zValidator("json", updateProductPricingSchema), async (c) => {
+  const { products: productsToUpdate } = c.req.valid("json");
+  const db = drizzle(pool);
+  
+  try {
+    const token = getCookie(c, 'token');
+    if (!token) {
+      return c.json({ error: 'No hay token' }, 401);
+    }
+
+    const decoded = await new Promise((resolve, reject) => {
+      jwt.verify(token, process.env.TOKEN_SECRET || 'my-secret', (error, decoded) => {
+        if (error) reject(error);
+        resolve(decoded);
+      });
+    });
+
+    const userId = (decoded as JwtPayload).id;
+    
+    const updatedProducts = [];
+    const errors = [];
+
+    for (const productData of productsToUpdate) {
+      try {
+        // Verify the product belongs to the user
+        const existingProduct = await db.select()
+          .from(products)
+          .where(and(
+            eq(products.id, productData.id),
+            eq(products.createdById, userId)
+          ))
+          .limit(1);
+
+        if (!existingProduct.length) {
+          errors.push(`Producto ${productData.id} no encontrado o no pertenece al usuario`);
+          continue;
+        }
+
+        const updateData: any = {};
+        
+        // Update price if provided
+        if (productData.price !== undefined) {
+          updateData.price = productData.price;
+        }
+        
+        // Update sizes if provided
+        if (productData.sizes && productData.sizes.length > 0) {
+          updateData.sizes = JSON.stringify(productData.sizes);
+        }
+
+        // Update the product
+        await db.update(products)
+          .set(updateData)
+          .where(eq(products.id, productData.id));
+
+        updatedProducts.push({
+          id: productData.id,
+          price: productData.price,
+          sizes: productData.sizes
+        });
+
+      } catch (error: any) {
+        console.error(`Error actualizando producto ${productData.id}:`, error);
+        errors.push(`Error actualizando producto ${productData.id}: ${error.message}`);
+      }
+    }
+
+    if (errors.length > 0) {
+      return c.json({
+        message: 'Algunos productos no pudieron ser actualizados',
+        updatedProducts,
+        errors
+      }, 207); // 207 Multi-Status
+    }
+
+    return c.json({
+      message: 'Productos actualizados exitosamente',
+      updatedProducts
+    }, 200);
+
+  } catch (error: any) {
+    console.error("Error en la ruta /update-pricing:", error);
+    return c.json({ error: 'Error al actualizar los productos' }, 500);
   }
 });
 

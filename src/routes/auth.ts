@@ -18,6 +18,7 @@ import { writeFile, unlink } from "fs/promises";
 import { join } from "path";
 import { OAuth2Client } from 'google-auth-library';
 import crypto from 'crypto';
+import { authMiddleware } from '../middlewares/auth.middleware';
 
 const UPLOAD_DIR = join(process.cwd(), 'public', 'uploads');
 
@@ -71,6 +72,20 @@ const userSchema = z.object({
 const signUpSchema = z.object({
     email: z.string().min(3).max(255),
     password: z.string().min(6),
+});
+
+const personalizeSchema = z.object({
+  gender: z.enum(['male', 'female']).optional(),
+  age: z.enum(['youth', 'adult', 'senior']).optional(),
+  skinTone: z.enum(['light', 'medium', 'dark']).optional(),
+  bodyType: z.enum(['slim', 'athletic', 'curvy']).optional()
+});
+
+const miTiendiaSchema = z.object({
+  storeName: z.string().min(3).max(255),
+  storeLogo: z.string().optional(), // Base64 image
+  phoneNumber: z.string().min(10).max(20),
+  countryCode: z.string().min(2).max(3),
 });
 
 // Rutas
@@ -336,4 +351,75 @@ export const authRoute = new Hono()
         
         return c.redirect(`https://my.tiendia.app/login?error=google_callback_failed`);
     }
+})
+.post('/mi-tiendia', authMiddleware, zValidator("json", miTiendiaSchema), async (c) => {
+    const { storeName, storeLogo, phoneNumber, countryCode } = c.req.valid("json");
+    const db = drizzle(pool);
+    
+    try {
+        const token = getCookie(c, 'token');
+        if (!token) {
+            return c.json({ error: 'No hay token' }, 401);
+        }
+
+        const decoded = await new Promise((resolve, reject) => {
+            jwt.verify(token, process.env.TOKEN_SECRET || 'my-secret', (error, decoded) => {
+                if (error) reject(error);
+                resolve(decoded);
+            });
+        });
+
+        const userId = (decoded as JwtPayload).id;
+        
+        // Generate store URL from store name
+        const storeUrl = storeName
+            .toLowerCase()
+            .replace(/[^a-z0-9]/g, '')
+            .substring(0, 20);
+        
+        // Handle logo upload if provided
+        let logoUrl: string | undefined;
+        if (storeLogo) {
+            try {
+                logoUrl = await saveImage(storeLogo);
+                console.log("Logo guardado en:", logoUrl);
+            } catch (error) {
+                console.error("Error al guardar el logo:", error);
+                return c.json({ error: 'Error al procesar el logo' }, 400);
+            }
+        }
+
+        // Update user with store information
+        await db.update(users).set({
+            name: storeName, // Use existing name field for store name
+            username: storeUrl, // Use existing username field for store URL
+            phone: phoneNumber, // Use existing phone field
+            imageUrl: logoUrl, // Use existing imageUrl field for store logo
+            paidMiTienda: true, // Use existing paidMiTienda field
+            paidMiTiendaDate: new Date(), // Use existing paidMiTiendaDate field
+        }).where(eq(users.id, userId));
+
+        // Get updated user data
+        const updatedUser = await db.select().from(users)
+            .where(eq(users.id, userId))
+            .limit(1);
+
+        return c.json({
+            message: 'Tienda creada exitosamente',
+            store: {
+                name: storeName,
+                url: storeUrl,
+                logoUrl: logoUrl,
+                phoneNumber: phoneNumber,
+                countryCode: countryCode
+            },
+            user: updatedUser[0]
+        }, 200);
+
+    } catch (error: any) {
+        console.error("Error en la ruta /mi-tiendia:", error);
+        return c.json({ error: 'Error al crear la tienda' }, 500);
+    }
 });
+
+export default authRoute;

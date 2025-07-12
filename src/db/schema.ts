@@ -14,6 +14,8 @@ export const users = mysqlTable("users", {
     name: varchar("name", { length: 255 }),
     username: varchar("username", { length: 255 }).unique(),
     phone: varchar("phone", { length: 255 }),
+    paidMiTienda: boolean("paid_mi_tienda").default(false),
+    paidMiTiendaDate: date("paid_mi_tienda_date"),
 });
 
 export const products = mysqlTable("products", {
