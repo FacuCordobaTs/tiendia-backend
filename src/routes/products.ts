@@ -198,6 +198,7 @@ export const productsRoute = new Hono()
       }
 
       const associatedImages = await db.select().from(images).where(eq(images.productId, id));
+      const associatedGeneratedIMages = await db.select().from(imageGenerations).where(eq(imageGenerations.productId, id));
 
       for (const image of associatedImages) {
         if (image.url) {
@@ -206,6 +207,7 @@ export const productsRoute = new Hono()
       }
 
       await db.delete(images).where(eq(images.productId, id));
+      await db.delete(imageGenerations).where(eq(imageGenerations.productId, id));
       await db.delete(products).where(eq(products.id, id));
 
       return c.json({ message: "Producto eliminado correctamente" }, 200);

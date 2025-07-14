@@ -18,6 +18,7 @@ const creditSchema = z.object({
     credits: z.number(),
 });
 
+// Configuración de dLocal
 const DLOCAL_SECRET_KEY = process.env.DLOCAL_SECRET_KEY!;
 const DLOCAL_API_KEY = process.env.DLOCAL_API_KEY!;
 
@@ -54,7 +55,10 @@ paymentsRoute.post("/create-preference", zValidator("json",creditSchema), async 
         creditsToAdd = 2500;
     } else if (credits == 10000) {
         creditsToAdd = 5000;
+    } else if (credits == 2000) {
+        creditsToAdd = 1;
     }
+
 
     const response = await fetch('https://api.mercadopago.com/checkout/preferences', {
       method: 'POST',
@@ -135,7 +139,7 @@ paymentsRoute.post('/webhook', async (c) => {
       const user = await db.select().from(users)
           .where(eq(users.id, transaction[0].userId));
 
-      if (user[0] && user[0].credits != null && transaction[0].creditsToAdd > 0) {
+      if (user[0] && user[0].credits != null && transaction[0].creditsToAdd > 0 && transaction[0].creditsToAdd != 1) {
         await db.update(users).set({
           credits: user[0].credits + transaction[0].creditsToAdd,
         }).where(eq(users.id, transaction[0].userId));
@@ -147,6 +151,19 @@ paymentsRoute.post('/webhook', async (c) => {
         }).where(eq(transactions.id, transaction[0].id));
 
         console.log(`MercadoPago: Added ${transaction[0].creditsToAdd} credits to user ${user[0].id} for payment ${preferenceId}`);
+      } else if (user[0] && transaction[0].creditsToAdd == 1) {
+        await db.update(users).set({
+          paidMiTienda: true,
+          paidMiTiendaDate: new Date(),
+        }).where(eq(users.id, transaction[0].userId));
+
+        await db.update(transactions).set({
+          status: "completed",
+          processed: true,
+          processedAt: new Date()
+        }).where(eq(transactions.id, transaction[0].id));
+
+        console.log(`MercadoPago MiTiendia: User ${user[0].id} paid for MiTiendia service`);
       }
     }
 
@@ -184,6 +201,8 @@ paymentsRoute.post('/webhook', async (c) => {
             creditsToAdd = 2500;
         } else if (credits == 10.625) {
             creditsToAdd = 5000;
+        } else if (credits == 2) {
+            creditsToAdd = 1;
         }
   
         // Crear pago en dLocal
@@ -195,10 +214,6 @@ paymentsRoute.post('/webhook', async (c) => {
             "success_url": "https://my.tiendia.app/home",
             "notification_url": "https://api.tiendia.app/api/payments/dlocal-webhook"
         };
-
-        console.log('dLocal payment payload:', JSON.stringify(dLocalPayment, null, 2));
-        console.log('dLocal API Key:', DLOCAL_API_KEY ? 'Present' : 'Missing');
-        console.log('dLocal Secret Key:', DLOCAL_SECRET_KEY ? 'Present' : 'Missing');
   
         const response = await fetch(`https://api.dlocalgo.com/v1/payments`, {
             method: 'POST',
@@ -210,11 +225,7 @@ paymentsRoute.post('/webhook', async (c) => {
         });
   
         if (!response.ok) {
-            const errorText = await response.text();
-            console.error('dLocal API error response:', errorText);
-            console.error('dLocal API status:', response.status);
-            console.error('dLocal API headers:', Object.fromEntries(response.headers.entries()));
-            throw new Error(`dLocal API error: ${response.status} - ${errorText}`);
+            throw new Error(`dLocal API error: ${response.status}`);
         }
   
         const paymentData = await response.json() as { order_id: string, redirect_url: string };
@@ -326,8 +337,20 @@ paymentsRoute.post('/webhook', async (c) => {
                 .where(eq(users.id, transaction[0].userId));
 
             if (user[0] && user[0].credits != null) {
-                // Handle MiTiendia payment (2 USD)
-                if (paymentDetails.amount == 2) {
+              
+                if (transaction[0].creditsToAdd > 0 && transaction[0].creditsToAdd != 1) {
+                  await db.update(users).set({
+                      credits: user[0].credits + transaction[0].creditsToAdd,
+                  }).where(eq(users.id, transaction[0].userId));
+
+                  await db.update(transactions).set({
+                    status: "completed",
+                    processed: true,
+                    processedAt: new Date()
+                  }).where(eq(transactions.id, transaction[0].id));
+
+                  console.log(`dLocal: Added ${transaction[0].creditsToAdd} credits to user ${user[0].id} for payment ${payment_id}`);
+                } else if (user[0] && transaction[0].creditsToAdd == 1) {
                   await db.update(users).set({
                     paidMiTienda: true,
                     paidMiTiendaDate: new Date(),
@@ -340,20 +363,6 @@ paymentsRoute.post('/webhook', async (c) => {
                   }).where(eq(transactions.id, transaction[0].id));
 
                   console.log(`dLocal MiTiendia: User ${user[0].id} paid for MiTiendia service`);
-                }
-                // Handle credit purchases using stored creditsToAdd value
-                else if (transaction[0].creditsToAdd > 0) {
-                  await db.update(users).set({
-                      credits: user[0].credits + transaction[0].creditsToAdd,
-                  }).where(eq(users.id, transaction[0].userId));
-
-                  await db.update(transactions).set({
-                    status: "completed",
-                    processed: true,
-                    processedAt: new Date()
-                  }).where(eq(transactions.id, transaction[0].id));
-
-                  console.log(`dLocal: Added ${transaction[0].creditsToAdd} credits to user ${user[0].id} for payment ${payment_id}`);
                 }
             }
         }

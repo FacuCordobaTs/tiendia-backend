@@ -127,13 +127,6 @@ const signUpSchema = z.object({
     password: z.string().min(6),
 });
 
-const personalizeSchema = z.object({
-  gender: z.enum(['male', 'female']).optional(),
-  age: z.enum(['youth', 'adult', 'senior']).optional(),
-  skinTone: z.enum(['light', 'medium', 'dark']).optional(),
-  bodyType: z.enum(['slim', 'athletic', 'curvy']).optional()
-});
-
 const miTiendiaSchema = z.object({
   storeName: z.string().min(3).max(255),
   storeLogo: z.string().optional(), // Base64 image
@@ -458,8 +451,6 @@ export const authRoute = new Hono()
             username: storeUrl, // Use existing username field for store URL
             phone: phoneNumber, // Use existing phone field
             imageUrl: logoUrl || currentUser[0]?.imageUrl, // Keep existing logo if no new one provided
-            paidMiTienda: true, // Use existing paidMiTienda field
-            paidMiTiendaDate: new Date(), // Use existing paidMiTiendaDate field
         }).where(eq(users.id, userId));
 
         // Get updated user data
@@ -498,8 +489,25 @@ export const authRoute = new Hono()
             return c.json({ error: 'Esta página no existe' }, 404);
         }
 
-        // Check if user has paid for MiTiendia
-        if (!user[0].paidMiTienda) {
+        // Check if user has paid for MiTiendia or is within grace period
+        const isPaid = user[0].paidMiTienda;
+        const paidDate = user[0].paidMiTiendaDate;
+        
+        let shouldShowStore = false;
+        
+        if (isPaid) {
+            shouldShowStore = true;
+        } else if (paidDate) {
+            // Check if less than 1 month and 2 days have passed since paidMiTiendaDate
+            const gracePeriodEnd = new Date(paidDate);
+            gracePeriodEnd.setMonth(gracePeriodEnd.getMonth() + 1);
+            gracePeriodEnd.setDate(gracePeriodEnd.getDate() + 2);
+            
+            const now = new Date();
+            shouldShowStore = now < gracePeriodEnd;
+        }
+
+        if (!shouldShowStore) {
             return c.json({ error: 'Esta página no existe' }, 404);
         }
 
