@@ -352,7 +352,7 @@ export const productsRoute = new Hono()
 
       if (credits[0] && credits[0].credits) { 
         await db.update(users).set({
-          credits: credits[0].credits,
+          credits: credits[0].credits - 50,
         }).where(eq(users.id, userId));
       }
 
@@ -675,7 +675,7 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
 
   if (credits[0] && credits[0].credits) { 
     await db.update(users).set({
-      credits: credits[0].credits ,
+      credits: credits[0].credits - 50,
     })
     .where(eq(users.id, userId))
   }
@@ -1081,7 +1081,7 @@ productsRoute.post("/personalize/:id", authMiddleware, zValidator("json", person
 
     if (credits[0] && credits[0].credits) { 
       await db.update(users).set({
-        credits: credits[0].credits ,
+        credits: credits[0].credits - 50,
       }).where(eq(users.id, userId));
     }
 
@@ -1227,7 +1227,7 @@ productsRoute.post("/back-image/:id", authMiddleware, zValidator("json", persona
 
     if (credits[0] && credits[0].credits) { 
       await db.update(users).set({
-        credits: credits[0].credits ,
+        credits: credits[0].credits - 50,
       }).where(eq(users.id, userId));
     }
 
@@ -1372,7 +1372,7 @@ productsRoute.post("/baby-image/:id", authMiddleware, zValidator("json", persona
 
     if (credits[0] && credits[0].credits) { 
       await db.update(users).set({
-        credits: credits[0].credits ,
+        credits: credits[0].credits - 50,
       }).where(eq(users.id, userId));
     }
     
