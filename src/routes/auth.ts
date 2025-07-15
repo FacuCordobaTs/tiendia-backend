@@ -518,6 +518,7 @@ export const authRoute = new Hono()
             imageURL: products.imageURL,
             price: products.price,
             sizes: products.sizes,
+            storeImageURLs: products.storeImageURLs,
         })
         .from(products)
         .where(eq(products.createdById, user[0].id));
