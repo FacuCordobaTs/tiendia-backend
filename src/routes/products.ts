@@ -139,7 +139,8 @@ const updateProductPricingSchema = z.object({
     sizes: z.array(z.object({
       name: z.string().min(1),
       stock: z.number().min(0)
-    })).optional()
+    })).optional(),
+    storeImageURLs: z.array(z.string().url()).optional(),
   }))
 });
 
@@ -1518,7 +1519,7 @@ productsRoute .post("/update-pricing", authMiddleware, zValidator("json", update
           updateData.sizes = JSON.stringify(productData.sizes);
         }
         // ✨ Handle the new field with type-safe check
-        if ('storeImageURLs' in productData && productData.storeImageURLs) {
+        if (productData.storeImageURLs) {
           updateData.storeImageURLs = JSON.stringify(productData.storeImageURLs);
         }
 
