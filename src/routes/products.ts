@@ -1471,8 +1471,8 @@ productsRoute.post("/baby-image/:id", authMiddleware, zValidator("json", persona
   }
 });
 
-productsRoute.post("/update-pricing", authMiddleware, zValidator("json", updateProductPricingSchema), async (c) => {
-  const { products: productsToUpdate } = c.req.valid("json");
+productsRoute .post("/update-pricing", authMiddleware, zValidator("json", updateProductPricingSchema), async (c) => {
+  const { products: productsToUpdate } = c.req.valid("json"); 
   const db = drizzle(pool);
   
   try {
@@ -1511,25 +1511,26 @@ productsRoute.post("/update-pricing", authMiddleware, zValidator("json", updateP
 
         const updateData: any = {};
         
-        // Update price if provided
         if (productData.price !== undefined) {
           updateData.price = productData.price;
         }
-        
-        // Update sizes if provided
-        if (productData.sizes && productData.sizes.length > 0) {
+        if (productData.sizes) {
           updateData.sizes = JSON.stringify(productData.sizes);
         }
+        // ✨ Handle the new field with type-safe check
+        if ('storeImageURLs' in productData && productData.storeImageURLs) {
+          updateData.storeImageURLs = JSON.stringify(productData.storeImageURLs);
+        }
 
-        // Update the product
-        await db.update(products)
-          .set(updateData)
-          .where(eq(products.id, productData.id));
+        // Only update if there's data to change
+        if (Object.keys(updateData).length > 0) {
+          await db.update(products)
+            .set(updateData)
+            .where(eq(products.id, productData.id));
+        }
 
         updatedProducts.push({
-          id: productData.id,
-          price: productData.price,
-          sizes: productData.sizes
+          ...productData
         });
 
       } catch (error: any) {
