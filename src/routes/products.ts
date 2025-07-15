@@ -5,7 +5,7 @@ import { drizzle } from "drizzle-orm/mysql2";
 import { pool } from "../db";
 import { imageGenerations, images, products, users } from "../db/schema";
 import { authMiddleware } from "../middlewares/auth.middleware";
-import { eq, sql, like, notLike, and } from "drizzle-orm"; // Added 'and', removed like and notLike from previous comment
+import { eq, sql, like, notLike, and, desc } from "drizzle-orm"; // Added 'and', removed like and notLike from previous comment
 import UUID from "uuid-js";
 import * as fs from "fs";
 import jwt, {JwtPayload} from "jsonwebtoken";
@@ -105,9 +105,15 @@ async function deleteImage(imageUrl: string): Promise<void> {
 }
 
 const updateProductSchema = z.object({
-  name: z.string().min(3).max(255),
-  imageBase64: z.string().optional(),
   id: z.number(),
+  name: z.string().min(3).max(255).optional(),
+  imageBase64: z.string().optional(),
+  price: z.number().min(0).optional(),
+  sizes: z.array(z.object({
+    name: z.string().min(1),
+    stock: z.number().min(0)
+  })).optional(),
+  storeImageURLs: z.array(z.string().url()).optional(),
 });
 
 const personalizeSchema = z.object({
@@ -138,50 +144,53 @@ const updateProductPricingSchema = z.object({
 });
 
 export const productsRoute = new Hono()
-  .put("/update", zValidator("json", updateProductSchema), async (c) => {
-    try {
-      const { name, imageBase64, id } = c.req.valid("json");
-      const db = drizzle(pool);
+.put("/update", zValidator("json", updateProductSchema), async (c) => {
+  try {
+    const { id, name, imageBase64, price, sizes, storeImageURLs } = c.req.valid("json");
+    const db = drizzle(pool);
 
-      let imageURL: string | undefined;
+    let newImageURL: string | undefined;
 
-      if (imageBase64) {
-        const [meta, data] = imageBase64.split(",");
-        const mimeType = meta.match(/:(.*?);/)?.[1];
+    if (imageBase64) {
+      const [meta, data] = imageBase64.split(",");
+      const mimeType = meta.match(/:(.*?);/)?.[1];
 
-        if (!mimeType || !ALLOWED_MIME_TYPES.includes(mimeType)) {
-          return c.json({ error: "Tipo de archivo no permitido" }, 400);
-        }
-
-        const buffer = Buffer.from(data, "base64");
-        if (buffer.byteLength > MAX_FILE_SIZE) {
-          return c.json({ error: "La imagen es demasiado grande" }, 400);
-        }
-
-        imageURL = await saveImage(imageBase64);
+      if (!mimeType || !ALLOWED_MIME_TYPES.includes(mimeType)) {
+        return c.json({ error: "Tipo de archivo no permitido" }, 400);
       }
 
-        await db
-        .update(products)
-        .set({
-          name,
-          ...(imageURL && { imageURL }),
-        })
-        .where(eq(products.id, id));
-      return c.json(
-        {
-          message: "Producto actualizado correctamente",
-          product: {
-            name,
-            imageURL,
-          },
-        },
-        200
-      );
-    } catch (error) {
-      return c.json({ message: "Error al actualizar el producto" }, 400);
+      const buffer = Buffer.from(data, "base64");
+      if (buffer.byteLength > MAX_FILE_SIZE) {
+        return c.json({ error: "La imagen es demasiado grande" }, 400);
+      }
+
+      newImageURL = await saveImage(imageBase64);
     }
-  })
+
+    const updateData: { [key: string]: any } = {};
+    
+    if (name) updateData.name = name;
+    if (newImageURL) updateData.imageURL = newImageURL;
+    if (price !== undefined) updateData.price = price;
+    if (sizes) updateData.sizes = JSON.stringify(sizes);
+    if (storeImageURLs) updateData.storeImageURLs = JSON.stringify(storeImageURLs);
+
+    if (Object.keys(updateData).length === 0) {
+      return c.json({ message: "No fields to update" }, 400);
+    }
+
+    await db
+      .update(products)
+      .set(updateData)
+      .where(eq(products.id, id));
+
+    return c.json({ message: "Producto actualizado correctamente" }, 200);
+
+  } catch (error) {
+    console.error("Error actualizando producto:", error);
+    return c.json({ message: "Error al actualizar el producto" }, 400);
+  }
+})
 
   .delete("/delete/:id", authMiddleware, async (c) => {
     const db = drizzle(pool);
@@ -229,6 +238,7 @@ export const productsRoute = new Hono()
           createdAt: products.createdAt,
           price: products.price,
           sizes: products.sizes,
+          storeImageURLs: products.storeImageURLs, // ✨ Return the new field
         })
         .from(products)
         .where(eq(products.createdById, Number(id)));
@@ -240,6 +250,49 @@ export const productsRoute = new Hono()
       return c.json({ products: productsListed }, 200);
     } catch (error) {
       return c.json({ message: "Error al obtener los productos" }, 400);
+    }
+  })
+  .get("/generated-images/:productId", authMiddleware, async (c) => {
+    const db = drizzle(pool);
+    const productId = Number(c.req.param("productId"));
+
+    if (isNaN(productId)) {
+        return c.json({ error: "ID de producto inválido" }, 400);
+    }
+
+    try {
+        const generatedImages = await db.select({
+            id: images.id,
+            url: images.url,
+            createdAt: images.createdAt
+        })
+        .from(images)
+        .where(eq(images.productId, productId))
+        .orderBy(desc(images.createdAt));
+        
+        const product = await db.select({
+            imageURL: products.imageURL,
+            createdAt: products.createdAt,
+        }).from(products).where(eq(products.id, productId)).limit(1);
+
+        const allImages = [...generatedImages];
+        
+        if (product[0]?.imageURL) {
+            // Add the main product image to the list if it's not already there
+            if (!allImages.some(img => img.url === product[0].imageURL)) {
+                allImages.unshift({
+                    id: -1, // Use a special ID for the main image to identify it
+                    url: product[0].imageURL,
+                    createdAt: product[0].createdAt
+                });
+            }
+        }
+        
+        return c.json({ images: allImages }, 200);
+
+    } catch (error: any) {
+        console.error(`Error al obtener imágenes generadas para el producto ${productId}:`, error);
+        return c.json({ message: "Error interno al obtener las imágenes." }, 500);
     }
   })
   .post("/generate-ad/:id", authMiddleware, async (c) => {

@@ -26,6 +26,7 @@ export const products = mysqlTable("products", {
     createdById: int("createdById").references(() => users.id),
     price: int("price"),
     sizes: text("sizes"),
+    storeImageURLs: text("store_image_urls"), // JSON array of image URLs for the store
 });
 
 export const images = mysqlTable("images", {
