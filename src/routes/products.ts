@@ -404,12 +404,6 @@ export const productsRoute = new Hono()
         includeModel: includeModel,
       };
 
-      if (credits[0] && credits[0].credits) { 
-        await db.update(users).set({
-          credits: credits[0].credits - 50,
-        }).where(eq(users.id, userId));
-      }
-
       await db.insert(imageGenerations).values({
         userId: userId,
         productId: id,
@@ -433,6 +427,11 @@ export const productsRoute = new Hono()
         }).$returningId();
         console.log(`Registro insertado en tabla 'images' para producto ${id}, URL: ${adImageUrl}`);
 
+        if (credits[0] && credits[0].credits) { 
+          await db.update(users).set({
+            credits: credits[0].credits - 50,
+          }).where(eq(users.id, userId));
+        }
         return c.json({
           message: "Publicidad generada correctamente.",
           adImageUrl: adImageUrl,
@@ -610,12 +609,6 @@ productsRoute.post("/images/modify/:imageId", authMiddleware, zValidator("json",
       prompt: prompt,
     };
 
-    await db.update(users).set({
-      credits: currentCredits - 100,
-    })
-    .where(eq(users.id, userId));
-
-
     await db.insert(imageGenerations).values({
       userId: userId,
       productId: originalImage.productId,
@@ -646,6 +639,11 @@ productsRoute.post("/images/modify/:imageId", authMiddleware, zValidator("json",
         createdAt: new Date(),
       }).$returningId();
       console.log(`Registro insertado en tabla 'images' para imagen modificada, URL: ${modifiedImageUrl}`);
+
+      await db.update(users).set({
+        credits: currentCredits - 100,
+      })
+      .where(eq(users.id, userId));
 
       return c.json(
         {
@@ -727,13 +725,6 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
     mimeType: mimeType,
   };
 
-  if (credits[0] && credits[0].credits) { 
-    await db.update(users).set({
-      credits: credits[0].credits - 50,
-    })
-    .where(eq(users.id, userId))
-  }
-
 
   try {
     const nameResult = await requestQueue.enqueue(nameWorkerPayload, workerUrl);
@@ -796,6 +787,13 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
     imageId = result[0].id;
   }
   
+  if (credits[0] && credits[0].credits) { 
+    await db.update(users).set({
+      credits: credits[0].credits - 50,
+    })
+    .where(eq(users.id, userId))
+  }
+
   return c.json(
     {
       message: "Producto procesado correctamente.",
@@ -810,129 +808,6 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
     { status: 200 }
   );
 })
-
-productsRoute.post("/migrate-images", authMiddleware, async (c) => {
-  const db = drizzle(pool);
-  let updatedProductUrlsCount = 0;
-  let updatedGeneratedImageUrlsCount = 0;
-  let errors: string[] = [];
-  const OLD_R2_DOMAIN_PATTERN = 'images.tiendia.app/%';
-
-  try {
-    console.log("Iniciando migración de URLs de imágenes de productos...");
-    const productsToUpdate = await db.select({
-        id: products.id,
-        imageURL: products.imageURL
-      })
-      .from(products)
-      .where(and(
-        like(products.imageURL, OLD_R2_DOMAIN_PATTERN),
-        notLike(products.imageURL, `${R2_PUBLIC_URL}/%`)
-      ));
-
-    console.log(`Encontrados ${productsToUpdate.length} productos con URLs de R2 antiguas para actualizar.`);
-
-    for (const product of productsToUpdate) {
-      if (!product.imageURL) {
-        console.warn(`Producto ID ${product.id} tiene imageURL nulo/vacío en los resultados, saltando.`);
-        continue;
-      }
-
-      try {
-        const oldUrl = product.imageURL;
-        const fileName = oldUrl.split('/').pop();
-
-        if (!fileName) {
-          console.warn(`No se pudo extraer el nombre de archivo de la URL: ${oldUrl} para el producto ID ${product.id}. Saltando.`);
-          errors.push(`Error extrayendo nombre de archivo para producto ${product.id}: ${oldUrl}`);
-          continue;
-        }
-
-        const newR2Url = `${R2_PUBLIC_URL}/${fileName}`;
-
-        await db.update(products)
-          .set({ imageURL: newR2Url })
-          .where(eq(products.id, product.id));
-
-        console.log(`Producto ID ${product.id}: URL de imagen actualizada a ${newR2Url}`);
-        updatedProductUrlsCount++;
-
-      } catch (error: any) {
-        console.error(`Error actualizando URL para producto ID ${product.id} (${product.imageURL}):`, error);
-        errors.push(`Error producto ${product.id} (${product.imageURL}): ${error.message}`);
-      }
-    }
-    console.log("Migración de URLs de imágenes de productos completada.");
-
-  } catch (error: any) {
-    console.error("Error durante la migración de URLs de imágenes de productos:", error);
-    errors.push(`Error general en migración de URLs de productos: ${error.message}`);
-  }
-
-  try {
-    console.log("Iniciando migración de URLs de imágenes generadas...");
-    const generatedImagesToUpdate = await db.select({
-        id: images.id,
-        url: images.url
-      })
-      .from(images)
-      .where(and(
-        like(images.url, OLD_R2_DOMAIN_PATTERN),
-        notLike(images.url, `${R2_PUBLIC_URL}/%`)
-      ));
-
-    console.log(`Encontradas ${generatedImagesToUpdate.length} imágenes generadas con URLs de R2 antiguas para actualizar.`);
-
-    for (const image of generatedImagesToUpdate) {
-      if (!image.url) {
-        console.warn(`Imagen generada ID ${image.id} tiene URL nula/vacía en los resultados, saltando.`);
-        continue;
-      }
-
-      try {
-        const oldUrl = image.url;
-        const fileName = oldUrl.split('/').pop();
-
-        if (!fileName) {
-          console.warn(`No se pudo extraer el nombre de archivo de la URL: ${oldUrl} para la imagen ID ${image.id}. Saltando.`);
-          errors.push(`Error extrayendo nombre de archivo para imagen ${image.id}: ${oldUrl}`);
-          continue;
-        }
-        
-        const newR2Url = `${R2_PUBLIC_URL}/${fileName}`;
-
-        await db.update(images)
-          .set({ url: newR2Url })
-          .where(eq(images.id, image.id));
-
-        console.log(`Imagen generada ID ${image.id}: URL actualizada a ${newR2Url}`);
-        updatedGeneratedImageUrlsCount++;
-
-      } catch (error: any) {
-        console.error(`Error actualizando URL para imagen generada ID ${image.id} (${image.url}):`, error);
-        errors.push(`Error imagen ${image.id} (${image.url}): ${error.message}`);
-      }
-    }
-    console.log("Migración de URLs de imágenes generadas completada.");
-
-  } catch (error: any) {
-    console.error("Error durante la migración de URLs de imágenes generadas:", error);
-    errors.push(`Error general en migración de URLs de imágenes generadas: ${error.message}`);
-  }
-
-  const summary = `Migración de URLs completada. URLs de productos actualizadas: ${updatedProductUrlsCount}. URLs de imágenes generadas actualizadas: ${updatedGeneratedImageUrlsCount}. Errores: ${errors.length}`;
-  console.log(summary);
-  if (errors.length > 0) {
-    console.error("Errores detallados:", errors);
-  }
-
-  return c.json({
-    message: summary,
-    updatedProductUrls: updatedProductUrlsCount,
-    updatedGeneratedImageUrls: updatedGeneratedImageUrlsCount,
-    errors: errors,
-  });
-});
 
 productsRoute.post("/upload-images", authMiddleware, async (c) => {
   const db = drizzle(pool);
@@ -1133,12 +1008,6 @@ productsRoute.post("/personalize/:id", authMiddleware, zValidator("json", person
       ...personalizationParams
     };
 
-    if (credits[0] && credits[0].credits) { 
-      await db.update(users).set({
-        credits: credits[0].credits - 50,
-      }).where(eq(users.id, userId));
-    }
-
     await db.insert(imageGenerations).values({
       userId: userId,
       productId: id,
@@ -1162,6 +1031,12 @@ productsRoute.post("/personalize/:id", authMiddleware, zValidator("json", person
         createdAt: new Date(),
       }).$returningId();
       console.log(`Registro insertado en tabla 'images' para producto ${id}, URL: ${personalizedImageUrl}`);
+
+      if (credits[0] && credits[0].credits) { 
+        await db.update(users).set({
+          credits: credits[0].credits - 50,
+        }).where(eq(users.id, userId));
+      }
 
       return c.json({
         message: "Imagen personalizada generada correctamente.",
@@ -1278,13 +1153,6 @@ productsRoute.post("/back-image/:id", authMiddleware, zValidator("json", persona
       ...personalizationParams
     };
 
-
-    if (credits[0] && credits[0].credits) { 
-      await db.update(users).set({
-        credits: credits[0].credits - 50,
-      }).where(eq(users.id, userId));
-    }
-
     await db.insert(imageGenerations).values({
       userId: userId,
       productId: id,
@@ -1308,6 +1176,12 @@ productsRoute.post("/back-image/:id", authMiddleware, zValidator("json", persona
         createdAt: new Date(),
       }).$returningId();
       console.log(`Registro insertado en tabla 'images' para producto ${id}, URL: ${backImageUrl}`);
+
+      if (credits[0] && credits[0].credits) { 
+        await db.update(users).set({
+          credits: credits[0].credits - 50,
+        }).where(eq(users.id, userId));
+      }
 
       return c.json({
         message: "Imagen de vista trasera generada correctamente.",
@@ -1423,12 +1297,6 @@ productsRoute.post("/baby-image/:id", authMiddleware, zValidator("json", persona
       mimeType: originalMimeType,
       ...personalizationParams
     };
-
-    if (credits[0] && credits[0].credits) { 
-      await db.update(users).set({
-        credits: credits[0].credits - 50,
-      }).where(eq(users.id, userId));
-    }
     
     await db.insert(imageGenerations).values({
       userId: userId,
@@ -1454,6 +1322,11 @@ productsRoute.post("/baby-image/:id", authMiddleware, zValidator("json", persona
       }).$returningId();
       console.log(`Registro insertado en tabla 'images' para producto ${id}, URL: ${babyImageUrl}`);
 
+      if (credits[0] && credits[0].credits) { 
+        await db.update(users).set({
+          credits: credits[0].credits - 50,
+        }).where(eq(users.id, userId));
+      }
 
       return c.json({
         message: "Imagen de bebé generada correctamente.",
@@ -1569,12 +1442,6 @@ productsRoute.post("/kid-image/:id", authMiddleware, zValidator("json", personal
       mimeType: originalMimeType,
       ...personalizationParams
     };
-
-    if (credits[0] && credits[0].credits) { 
-      await db.update(users).set({
-        credits: credits[0].credits - 50,
-      }).where(eq(users.id, userId));
-    }
     
     await db.insert(imageGenerations).values({
       userId: userId,
@@ -1600,6 +1467,11 @@ productsRoute.post("/kid-image/:id", authMiddleware, zValidator("json", personal
       }).$returningId();
       console.log(`Registro insertado en tabla 'images' para producto ${id}, URL: ${kidImageUrl}`);
 
+      if (credits[0] && credits[0].credits) { 
+        await db.update(users).set({
+          credits: credits[0].credits - 50,
+        }).where(eq(users.id, userId));
+      }
 
       return c.json({
         message: "Imagen de niño generada correctamente.",
