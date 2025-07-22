@@ -284,7 +284,15 @@ export const authRoute = new Hono()
 })
 .get('/google', async (c) => {
     const state = crypto.randomBytes(16).toString('hex');
+    const redirectUri = c.req.query('redirect_uri') || 'https://my.tiendia.app/home';
     setCookie(c, 'oauth_state', state, {
+        path: '/api/auth/google/callback',
+        httpOnly: true,
+        maxAge: 600,
+        sameSite: 'None',
+        secure: process.env.NODE_ENV === 'production',
+    });
+    setCookie(c, 'oauth_redirect_uri', redirectUri, {
         path: '/api/auth/google/callback',
         httpOnly: true,
         maxAge: 600,
@@ -310,20 +318,19 @@ export const authRoute = new Hono()
     
     deleteCookie(c, 'oauth_state', { path: '/api/auth/google/callback' });
 
+    const redirectUri = getCookie(c, 'oauth_redirect_uri') || 'https://my.tiendia.app/home';
+    deleteCookie(c, 'oauth_redirect_uri', { path: '/api/auth/google/callback' });
 
     if (!code) {
-        
-            const error = c.req.query('error');
-            console.error("Google OAuth Error:", error);
-            return c.redirect(`https://my.tiendia.app/login?error=${error || 'unknown_google_error'}`);
+        const error = c.req.query('error');
+        console.error("Google OAuth Error:", error);
+        return c.redirect(`${redirectUri}?error=${error || 'unknown_google_error'}`);
     }
 
     try {
-        
         const { tokens } = await googleClient.getToken(code);
         googleClient.setCredentials(tokens); 
 
-        
         if (!tokens.id_token) {
             throw new Error("ID token not received from Google.");
         }
@@ -339,26 +346,21 @@ export const authRoute = new Hono()
         const googleId = payload.sub;
         const email = payload.email;
 
-        
-        let user: (typeof users.$inferSelect) | null = null;
+        let user = null;
         const existingUser = await db.select().from(users)
             .where(eq(users.email, email))
             .limit(1);
 
         if (existingUser.length) {
-            
             user = existingUser[0];
-            
             if (!user.googleId) {
                 await db.update(users)
                 .set({ googleId: googleId }) 
                 .where(eq(users.id, user.id));
                 user.googleId = googleId; 
             } else if (user.googleId !== googleId) {
-                return c.redirect(`https://my.tiendia.app/login?error=email_google_conflict`);
+                return c.redirect(`${redirectUri}?error=email_google_conflict`);
             }
-            
-
         } else {
             const insertResult = await db.insert(users).values({
                 email,
@@ -373,12 +375,10 @@ export const authRoute = new Hono()
                 throw new Error("No se pudo encontrar el usuario de Google recién creado.");
             }
             user = newUserResult[0];
-
         }
 
-        
         if (!user) { 
-                throw new Error("No se pudo obtener o crear la información del usuario.");
+            throw new Error("No se pudo obtener o crear la información del usuario.");
         }
         const token = await createAccessToken({ id: user.id });
 
@@ -388,14 +388,10 @@ export const authRoute = new Hono()
             secure: true,
             maxAge: 7 * 24 * 60 * 60,
         });
-        
-        return c.redirect(`https://my.tiendia.app/home`); 
-
-
+        return c.redirect(redirectUri);
     } catch (error: any) {
         console.error("Google Callback Error:", error);
-        
-        return c.redirect(`https://my.tiendia.app/login?error=google_callback_failed`);
+        return c.redirect(`${redirectUri}?error=google_callback_failed`);
     }
 })
 .post('/mi-tiendia', authMiddleware, zValidator("json", miTiendiaSchema), async (c) => {
