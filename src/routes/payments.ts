@@ -53,7 +53,7 @@ paymentsRoute.post("/create-preference", zValidator("json",creditSchema), async 
         creditsToAdd = 500;
     } else if (credits == 5280 || credits == 4200) {
         creditsToAdd = 2500;
-    } else if (credits == 10000) {
+    } else if (credits == 10000 || credits == 8400) {
         creditsToAdd = 5000;
     } else if (credits == 2000) {
         creditsToAdd = 1;
@@ -199,7 +199,7 @@ paymentsRoute.post('/webhook', async (c) => {
             creditsToAdd = 500;
         } else if (credits == 5.5 || credits == 4.4) {
             creditsToAdd = 2500;
-        } else if (credits == 10.625) {
+        } else if (credits == 10.625 || credits == 8.8) {
             creditsToAdd = 5000;
         } else if (credits == 2) {
             creditsToAdd = 1;
