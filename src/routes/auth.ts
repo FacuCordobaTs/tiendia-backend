@@ -487,20 +487,11 @@ export const authRoute = new Hono()
 
         // Check if user has paid for MiTiendia or is within grace period
         const isPaid = user[0].paidMiTienda;
-        const paidDate = user[0].paidMiTiendaDate;
         
-        let shouldShowStore = false;
+        let shouldShowStore = isPaid;
         
         if (isPaid) {
             shouldShowStore = true;
-        } else if (paidDate) {
-            // Check if less than 1 month and 2 days have passed since paidMiTiendaDate
-            const gracePeriodEnd = new Date(paidDate);
-            gracePeriodEnd.setMonth(gracePeriodEnd.getMonth() + 1);
-            gracePeriodEnd.setDate(gracePeriodEnd.getDate() + 2);
-            
-            const now = new Date();
-            shouldShowStore = now < gracePeriodEnd;
         }
 
         if (!shouldShowStore) {
