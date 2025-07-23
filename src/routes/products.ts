@@ -301,7 +301,16 @@ export const productsRoute = new Hono()
     const db = drizzle(pool);
     const workerUrl = "https://gemini-worker.facucordoba200.workers.dev";
     const requestQueue = GeminiRequestQueue.getInstance();
-    const token = getCookie(c, 'token');
+    let token = getCookie(c, 'token');
+
+    if (!token) {
+      // Buscar en el header Authorization
+      const authHeader = c.req.header('Authorization');
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+          token = authHeader.replace('Bearer ', '');
+      }
+  }
+
     if (!token) return c.json({ error: 'Unauthorized' }, 401);
 
     const decoded = await new Promise((resolve, reject) => {
@@ -527,7 +536,14 @@ productsRoute.post("/images/modify/:imageId", authMiddleware, zValidator("json",
     return c.json({ error: "ID de imagen inválido" }, 400);
   }
 
-  const token = getCookie(c, 'token');
+  let token = getCookie(c, 'token');
+  if (!token) {
+    // Buscar en el header Authorization
+    const authHeader = c.req.header('Authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.replace('Bearer ', '');
+    }
+  }
   if (!token) return c.json({ error: 'Unauthorized' }, 401);
 
   let userId: number;
@@ -673,7 +689,14 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
   
   const workerUrl = "https://gemini-worker.facucordoba200.workers.dev";
   const requestQueue = GeminiRequestQueue.getInstance();
-  const token = getCookie(c, 'token');
+  let token = getCookie(c, 'token');
+  if (!token) {
+      // Buscar en el header Authorization
+      const authHeader = c.req.header('Authorization');
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+          token = authHeader.replace('Bearer ', '');
+      }
+  }
   if (!token) {
       return c.json({ message: 'No hay token' }, 200);
   }
@@ -811,7 +834,14 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
 
 productsRoute.post("/upload-images", authMiddleware, async (c) => {
   const db = drizzle(pool);
-  const token = getCookie(c, 'token');
+  let token = getCookie(c, 'token');
+  if (!token) {
+    // Buscar en el header Authorization
+    const authHeader = c.req.header('Authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.replace('Bearer ', '');
+    }
+  }
   if (!token) {
     return c.json({ message: 'No hay token' }, 401);
   }
@@ -915,7 +945,15 @@ productsRoute.post("/personalize/:id", authMiddleware, zValidator("json", person
   const db = drizzle(pool);
   const workerUrl = "https://personalized-worker.facucordoba200.workers.dev/personalize-image";
   const requestQueue = GeminiRequestQueue.getInstance();
-  const token = getCookie(c, 'token');
+  let token = getCookie(c, 'token');
+  if (!token) {
+    // Buscar en el header Authorization
+    const authHeader = c.req.header('Authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.replace('Bearer ', '');
+    }
+  }
+
   if (!token) return c.json({ error: 'Unauthorized' }, 401);
 
   const decoded = await new Promise((resolve, reject) => {
@@ -1060,7 +1098,14 @@ productsRoute.post("/back-image/:id", authMiddleware, zValidator("json", persona
   const db = drizzle(pool);
   const workerUrl = "https://personalized-worker.facucordoba200.workers.dev/back-image";
   const requestQueue = GeminiRequestQueue.getInstance();
-  const token = getCookie(c, 'token');
+  let token = getCookie(c, 'token');
+  if (!token) {
+    // Buscar en el header Authorization
+    const authHeader = c.req.header('Authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.replace('Bearer ', '');
+    }
+  }
   if (!token) return c.json({ error: 'Unauthorized' }, 401);
 
   const decoded = await new Promise((resolve, reject) => {
@@ -1205,7 +1250,14 @@ productsRoute.post("/baby-image/:id", authMiddleware, zValidator("json", persona
   const db = drizzle(pool);
   const workerUrl = "https://personalized-worker.facucordoba200.workers.dev/baby-image";
   const requestQueue = GeminiRequestQueue.getInstance();
-  const token = getCookie(c, 'token');
+  let token = getCookie(c, 'token');
+  if (!token) {
+    // Buscar en el header Authorization
+    const authHeader = c.req.header('Authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.replace('Bearer ', '');
+    }
+  }
   if (!token) return c.json({ error: 'Unauthorized' }, 401);
 
   const decoded = await new Promise((resolve, reject) => {
@@ -1350,9 +1402,15 @@ productsRoute.post("/kid-image/:id", authMiddleware, zValidator("json", personal
   const db = drizzle(pool);
   const workerUrl = "https://personalized-worker.facucordoba200.workers.dev/kid-image";
   const requestQueue = GeminiRequestQueue.getInstance();
-  const token = getCookie(c, 'token');
+  let token = getCookie(c, 'token');
+  if (!token) {
+    // Buscar en el header Authorization
+    const authHeader = c.req.header('Authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.replace('Bearer ', '');
+    }
+  }
   if (!token) return c.json({ error: 'Unauthorized' }, 401);
-
   const decoded = await new Promise((resolve, reject) => {
     jwt.verify(token, process.env.TOKEN_SECRET || 'my-secret', (error, decoded) => {
       if (error) reject(error);
@@ -1495,7 +1553,14 @@ productsRoute .post("/update-pricing", authMiddleware, zValidator("json", update
   const db = drizzle(pool);
   
   try {
-    const token = getCookie(c, 'token');
+    let token = getCookie(c, 'token');
+    if (!token) {
+      // Buscar en el header Authorization
+      const authHeader = c.req.header('Authorization');
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+          token = authHeader.replace('Bearer ', '');
+      }
+    }
     if (!token) {
       return c.json({ error: 'No hay token' }, 401);
     }

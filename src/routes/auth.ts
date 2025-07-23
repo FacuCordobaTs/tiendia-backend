@@ -440,11 +440,17 @@ export const authRoute = new Hono()
     const db = drizzle(pool);
     
     try {
-        const token = getCookie(c, 'token');
+        let token = getCookie(c, 'token');
+        if (!token) {
+            // Buscar en el header Authorization
+            const authHeader = c.req.header('Authorization');
+            if (authHeader && authHeader.startsWith('Bearer ')) {
+                token = authHeader.replace('Bearer ', '');
+            }
+        }
         if (!token) {
             return c.json({ error: 'No hay token' }, 401);
         }
-
         const decoded = await new Promise((resolve, reject) => {
             jwt.verify(token, process.env.TOKEN_SECRET || 'my-secret', (error, decoded) => {
                 if (error) reject(error);
