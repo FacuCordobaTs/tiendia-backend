@@ -285,6 +285,9 @@ export const authRoute = new Hono()
 .get('/google', async (c) => {
     const state = crypto.randomBytes(16).toString('hex');
     const redirectUri = c.req.query('redirect_uri') || 'https://my.tiendia.app/home';
+    // Codifica state y redirectUri en base64
+    const stateObj = { state, redirectUri };
+    const stateParam = Buffer.from(JSON.stringify(stateObj)).toString('base64');
     setCookie(c, 'oauth_state', state, {
         path: '/api/auth/google/callback',
         httpOnly: true,
@@ -292,13 +295,7 @@ export const authRoute = new Hono()
         sameSite: 'None',
         secure: process.env.NODE_ENV === 'production',
     });
-    setCookie(c, 'oauth_redirect_uri', redirectUri, {
-        path: '/api/auth/google/callback',
-        httpOnly: true,
-        maxAge: 600,
-        sameSite: 'None',
-        secure: process.env.NODE_ENV === 'production',
-    });
+    // Ya no se usa oauth_redirect_uri
 
     const authUrl = googleClient.generateAuthUrl({
         access_type: 'offline',
@@ -307,7 +304,7 @@ export const authRoute = new Hono()
             'https://www.googleapis.com/auth/userinfo.profile',
             'openid', 
         ],
-        state: state,
+        state: stateParam,
     });
     return c.redirect(authUrl);
 })
@@ -318,8 +315,20 @@ export const authRoute = new Hono()
     
     deleteCookie(c, 'oauth_state', { path: '/api/auth/google/callback' });
 
-    const redirectUri = getCookie(c, 'oauth_redirect_uri') || 'https://my.tiendia.app/home';
-    deleteCookie(c, 'oauth_redirect_uri', { path: '/api/auth/google/callback' });
+    // Decodifica el parámetro state
+    let redirectUri = 'https://my.tiendia.app/home';
+    try {
+      const stateParam = c.req.query('state');
+      if (stateParam) {
+        const stateObj = JSON.parse(Buffer.from(stateParam, 'base64').toString('utf-8'));
+        if (stateObj.redirectUri) {
+          redirectUri = stateObj.redirectUri;
+        }
+      }
+    } catch (e) {
+      // Si falla, usa el default
+      redirectUri = 'https://my.tiendia.app/home';
+    }
 
     if (!code) {
         const error = c.req.query('error');
