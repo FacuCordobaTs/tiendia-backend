@@ -300,7 +300,8 @@ export const authRoute = new Hono()
         httpOnly: true,
         maxAge: 600,
         sameSite: 'None',
-        secure: process.env.NODE_ENV === 'production',
+        // secure: process.env.NODE_ENV === 'production',
+        secure: true,
     });
     // Ya no se usa oauth_redirect_uri
 
