@@ -376,5 +376,26 @@ paymentsRoute.post('/webhook', async (c) => {
     }
   });
 
+  paymentsRoute.get('/exchange-rates', async (c) => {
+    try {
+        const response = await fetch('https://api.dlocalgo.com/v1/currency-exchanges', {
+            headers: {
+                'Authorization': `Bearer ${DLOCAL_API_KEY}:${DLOCAL_SECRET_KEY}`,
+            },
+        });
+
+        if (!response.ok) {
+            console.error('dLocal API error fetching exchange rates:', response.status);
+            throw new Error('Could not fetch exchange rates');
+        }
+
+        const rates = await response.json() as { source_currency: string, target_currency: string, value: number }[];
+        return c.json(rates);
+
+    } catch (error) {
+        console.error('Error in /exchange-rates endpoint:', error);
+        return c.json({ error: 'Internal Server Error' }, 500);
+    }
+});
 
 export default paymentsRoute
