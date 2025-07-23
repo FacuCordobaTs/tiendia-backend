@@ -312,43 +312,54 @@ export const authRoute = new Hono()
 .get('/google/callback', async (c) => {
     const db = drizzle(pool);
     const code = c.req.query('code');
+    const stateParam = c.req.query('state');
+    console.log('--- Google OAuth Callback ---');
+    console.log('Query params:', c.req.query());
+    console.log('code:', code);
+    console.log('stateParam:', stateParam);
     
     deleteCookie(c, 'oauth_state', { path: '/api/auth/google/callback' });
 
     // Decodifica el parámetro state
     let redirectUri = 'https://my.tiendia.app/home';
     try {
-      const stateParam = c.req.query('state');
       if (stateParam) {
         const stateObj = JSON.parse(Buffer.from(stateParam, 'base64').toString('utf-8'));
+        console.log('Decoded stateObj:', stateObj);
         if (stateObj.redirectUri) {
           redirectUri = stateObj.redirectUri;
         }
       }
     } catch (e) {
-      // Si falla, usa el default
+      console.error('Error decoding state:', e);
       redirectUri = 'https://my.tiendia.app/home';
     }
 
     if (!code) {
         const error = c.req.query('error');
-        console.error("Google OAuth Error:", error);
+        console.error('Google OAuth Error (no code):', error);
         return c.redirect(`${redirectUri}?error=${error || 'unknown_google_error'}`);
     }
 
     try {
+        console.log('Getting Google tokens...');
         const { tokens } = await googleClient.getToken(code);
+        console.log('Google tokens:', tokens);
         googleClient.setCredentials(tokens); 
 
         if (!tokens.id_token) {
+            console.error('No ID token received from Google.');
             throw new Error("ID token not received from Google.");
         }
+        console.log('Verifying ID token...');
         const loginTicket = await googleClient.verifyIdToken({
             idToken: tokens.id_token,
             audience: process.env.GOOGLE_CLIENT_ID,
         });
         const payload = loginTicket.getPayload();
+        console.log('Google payload:', payload);
         if (!payload || !payload.sub || !payload.email) {
+            console.error('Invalid Google profile payload.');
             throw new Error('Información de perfil de Google inválida.');
         }
 
@@ -359,6 +370,7 @@ export const authRoute = new Hono()
         const existingUser = await db.select().from(users)
             .where(eq(users.email, email))
             .limit(1);
+        console.log('Existing user:', existingUser);
 
         if (existingUser.length) {
             user = existingUser[0];
@@ -368,6 +380,7 @@ export const authRoute = new Hono()
                 .where(eq(users.id, user.id));
                 user.googleId = googleId; 
             } else if (user.googleId !== googleId) {
+                console.error('Email/GoogleID conflict.');
                 return c.redirect(`${redirectUri}?error=email_google_conflict`);
             }
         } else {
@@ -381,15 +394,18 @@ export const authRoute = new Hono()
             .where(eq(users.id, userId))
             .limit(1);
             if (!newUserResult.length) {
+                console.error('No se pudo encontrar el usuario de Google recién creado.');
                 throw new Error("No se pudo encontrar el usuario de Google recién creado.");
             }
             user = newUserResult[0];
         }
 
         if (!user) { 
+            console.error('No se pudo obtener o crear la información del usuario.');
             throw new Error("No se pudo obtener o crear la información del usuario.");
         }
         const token = await createAccessToken({ id: user.id });
+        console.log('Generated JWT token for user:', user.id);
 
         setCookie(c, 'token', token as string, {
             path: '/',
@@ -397,9 +413,10 @@ export const authRoute = new Hono()
             secure: true,
             maxAge: 7 * 24 * 60 * 60,
         });
+        console.log('Redirecting to:', redirectUri);
         return c.redirect(redirectUri);
     } catch (error: any) {
-        console.error("Google Callback Error:", error);
+        console.error('Google Callback Error:', error);
         return c.redirect(`${redirectUri}?error=google_callback_failed`);
     }
 })
