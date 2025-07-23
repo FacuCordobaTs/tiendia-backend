@@ -8,7 +8,14 @@ import { users } from '../db/schema';
 
 export const authMiddleware = async (c: any, next: Function) => {
   try {
-    const token = getCookie(c, 'token');
+    let token = getCookie(c, 'token');
+    if (!token) {
+      // Buscar en el header Authorization
+      const authHeader = c.req.header('Authorization');
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+          token = authHeader.replace('Bearer ', '');
+      }
+  }
     if (!token) {
       return c.json({ message: 'No hay token' }, 200);
     }
