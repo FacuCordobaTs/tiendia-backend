@@ -254,7 +254,14 @@ export const authRoute = new Hono()
 })
 .get('/profile', async (c) => {
     try {     
-        const token = getCookie(c, 'token');
+        let token = getCookie(c, 'token');
+        if (!token) {
+            // Buscar en el header Authorization
+            const authHeader = c.req.header('Authorization');
+            if (authHeader && authHeader.startsWith('Bearer ')) {
+                token = authHeader.replace('Bearer ', '');
+            }
+        }
         if (!token) {
             return c.json({ message: 'No hay token' }, 200);
         }
