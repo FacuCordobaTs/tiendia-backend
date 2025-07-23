@@ -336,7 +336,7 @@ export const authRoute = new Hono()
     }
 
     if (!code) {
-        const error = c.req.query('error');
+            const error = c.req.query('error');
         console.error('Google OAuth Error (no code):', error);
         return c.redirect(`${redirectUri}?error=${error || 'unknown_google_error'}`);
     }
@@ -346,7 +346,7 @@ export const authRoute = new Hono()
         const { tokens } = await googleClient.getToken(code);
         console.log('Google tokens:', tokens);
         googleClient.setCredentials(tokens); 
-
+        
         if (!tokens.id_token) {
             console.error('No ID token received from Google.');
             throw new Error("ID token not received from Google.");
@@ -399,10 +399,10 @@ export const authRoute = new Hono()
             }
             user = newUserResult[0];
         }
-
+        
         if (!user) { 
             console.error('No se pudo obtener o crear la información del usuario.');
-            throw new Error("No se pudo obtener o crear la información del usuario.");
+                throw new Error("No se pudo obtener o crear la información del usuario.");
         }
         const token = await createAccessToken({ id: user.id });
         console.log('Generated JWT token for user:', user.id);
@@ -413,6 +413,13 @@ export const authRoute = new Hono()
             secure: true,
             maxAge: 7 * 24 * 60 * 60,
         });
+        // Redirección final con token en el deep link para mobile
+        if (redirectUri.startsWith('exp://') || redirectUri.startsWith('tiendia://')) {
+          const url = new URL(redirectUri);
+          url.searchParams.set('token', token as string);
+          console.log('Redirecting to (with token):', url.toString());
+          return c.redirect(url.toString());
+        }
         console.log('Redirecting to:', redirectUri);
         return c.redirect(redirectUri);
     } catch (error: any) {
