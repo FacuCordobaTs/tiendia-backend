@@ -657,7 +657,7 @@ productsRoute.post("/images/modify/:imageId", authMiddleware, zValidator("json",
       console.log(`Registro insertado en tabla 'images' para imagen modificada, URL: ${modifiedImageUrl}`);
 
       await db.update(users).set({
-        credits: currentCredits - 100,
+        credits: currentCredits - 50,
       })
       .where(eq(users.id, userId));
 
