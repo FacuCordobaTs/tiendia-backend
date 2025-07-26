@@ -16,6 +16,7 @@ const paymentsRoute = new Hono<{ Bindings: Env }>();
 
 const creditSchema = z.object({
     credits: z.number(),
+    uri: z.string().optional(),
 });
 
 // Configuración de dLocal
@@ -33,7 +34,7 @@ function validateDLocalSignature(apiKey: string, payload: string, secretKey: str
 
 
 paymentsRoute.post("/create-preference", zValidator("json",creditSchema), async (c) => {
-    const { credits } = c.req.valid("json");
+    const { credits, uri } = c.req.valid("json");
     let token = getCookie(c, 'token');
     if (!token) {
         // Buscar en el header Authorization
@@ -85,7 +86,7 @@ paymentsRoute.post("/create-preference", zValidator("json",creditSchema), async 
           }
         ],
         back_urls: {
-          success: `https://my.tiendia.app/home`,
+          success: uri || `https://my.tiendia.app/home`,
         },
         notification_url: "https://api.tiendia.app/api/payments/webhook",
         statement_descriptor: "Carga de imagen",
@@ -183,7 +184,7 @@ paymentsRoute.post('/webhook', async (c) => {
 
 
   paymentsRoute.post("/create-dlocal-payment", zValidator("json", creditSchema), async (c) => {
-    const { credits } = c.req.valid("json");
+    const { credits, uri } = c.req.valid("json");
     let token = getCookie(c, 'token');
     if (!token) {
         // Buscar en el header Authorization
@@ -225,7 +226,7 @@ paymentsRoute.post('/webhook', async (c) => {
             currency: "USD",
             order_id: orderId,
             "description": "Compra de imagenes en tiendia",
-            "success_url": "https://my.tiendia.app/home",
+            "success_url": uri || "https://my.tiendia.app/home",
             "notification_url": "https://api.tiendia.app/api/payments/dlocal-webhook"
         };
   
