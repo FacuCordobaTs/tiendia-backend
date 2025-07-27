@@ -62,7 +62,14 @@ creditsRouter
 })
 .post('/admin-add-credits', zValidator("json",addCreditsSchema), async (c) => {
     const { credits } = c.req.valid('json');
-    const token = getCookie(c, 'token');
+    let token = getCookie(c, 'token');
+    if (!token) {
+        // Buscar en el header Authorization
+        const authHeader = c.req.header('Authorization');
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+            token = authHeader.replace('Bearer ', '');
+        }
+    }
     if (!token) return c.json({ error: 'Unauthorized' }, 401);
     const db = drizzle(pool);
 
