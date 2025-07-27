@@ -68,6 +68,7 @@ creditsRouter
         const authHeader = c.req.header('Authorization');
         if (authHeader && authHeader.startsWith('Bearer ')) {
             token = authHeader.replace('Bearer ', '');
+            console.log(token)
         }
     }
     if (!token) return c.json({ error: 'Unauthorized' }, 401);
