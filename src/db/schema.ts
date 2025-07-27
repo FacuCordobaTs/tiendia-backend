@@ -16,6 +16,7 @@ export const users = mysqlTable("users", {
     phone: varchar("phone", { length: 255 }),
     paidMiTienda: boolean("paid_mi_tienda").default(false),
     paidMiTiendaDate: date("paid_mi_tienda_date"),
+    expoPushToken: varchar('expoPushToken', { length: 255 }),
 });
 
 export const products = mysqlTable("products", {

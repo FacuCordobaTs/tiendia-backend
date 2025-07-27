@@ -134,6 +134,10 @@ const miTiendiaSchema = z.object({
   countryCode: z.string().min(2).max(3),
 });
 
+const savePushTokenSchema = z.object({
+  pushToken: z.string().min(1),
+});
+
 // Rutas
 export const authRoute = new Hono()
 .post('/register', zValidator("json", signUpSchema), async (c) => {
@@ -572,5 +576,40 @@ export const authRoute = new Hono()
         return c.json({ error: 'Error interno del servidor' }, 500);
     }
 });
+
+authRoute.post('/save-push-token', zValidator("json", savePushTokenSchema), async (c) => {
+    const { pushToken } = c.req.valid("json");
+    const db = drizzle(pool);
+    let token = getCookie(c, 'token');
+    if (!token) {
+        // Buscar en el header Authorization
+        const authHeader = c.req.header('Authorization');
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+            token = authHeader.replace('Bearer ', '');
+        }
+    }
+    if (!token) {
+        return c.json({ error: 'No hay token' }, 401);
+    }
+    const decoded = await new Promise((resolve, reject) => {
+        jwt.verify(token, process.env.TOKEN_SECRET || 'my-secret', (error, decoded) => {
+            if (error) reject(error);
+            resolve(decoded);
+        });
+    });
+    try {
+        const userId = (decoded as JwtPayload).id;
+
+        await db.update(users).set({
+            expoPushToken: pushToken
+        }).where(eq(users.id, userId));
+        
+        return c.json({ message: 'Token guardado exitosamente' }, 200);
+    } catch (error: any) {
+        console.error("Error en la ruta /save-push-token:", error);
+        return c.json({ error: 'Error al guardar el token' }, 500);
+    }
+});
+
 
 export default authRoute;
