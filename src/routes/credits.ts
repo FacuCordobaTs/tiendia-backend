@@ -63,11 +63,10 @@ creditsRouter
 .post('/admin-add-credits', zValidator("json",addCreditsSchema), async (c) => {
     const { credits } = c.req.valid('json');
     let token = getCookie(c, 'token');
-    console.log("NEW REQUEST")
     if (!token) {
         // Buscar en el header Authorization
         const authHeader = c.req.header('Authorization');
-        console.log(authHeader)
+        console.log('AUTH HEADER', authHeader)
         if (authHeader && authHeader.startsWith('Bearer ')) {
             token = authHeader.replace('Bearer ', '');
         }
