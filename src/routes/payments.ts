@@ -164,23 +164,23 @@ paymentsRoute.post('/webhook', async (c) => {
 
         if (expoPushToken) {
           const message = {
-            to: expoPushToken,
-            sound: 'default',
-            title: '¡Compra exitosa! ✨',
-            body: `Se han añadido ${transaction[0].creditsToAdd} créditos a tu cuenta. ¡Ya puedes generar tus imágenes!`,
-            data: { action: 'credits_updated', newBalance: user[0].credits + transaction[0].creditsToAdd },
-        };
+              to: expoPushToken,
+              sound: 'default',
+              title: '¡Compra exitosa! ✨',
+              body: `Se han añadido ${transaction[0].creditsToAdd} créditos a tu cuenta. ¡Ya puedes generar tus imágenes!`,
+              data: { action: 'credits_updated', newBalance: user[0].credits + transaction[0].creditsToAdd },
+          };
 
-        await fetch('https://exp.host/--/api/v2/push/send', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-            'Accept-encoding': 'gzip, deflate',
-          },
-          body: JSON.stringify(message),
-        });
-        console.log('Push notification sent successfully to user ', user[0].id);
+          await fetch('https://exp.host/--/api/v2/push/send', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'Accept-encoding': 'gzip, deflate',
+            },
+            body: JSON.stringify(message),
+          });
+          console.log('Push notification sent successfully to user ', user[0].id);
         }
         console.log(`MercadoPago: Added ${transaction[0].creditsToAdd} credits to user ${user[0].id} for payment ${preferenceId}`);
       } else if (user[0] && transaction[0].creditsToAdd == 1) {
