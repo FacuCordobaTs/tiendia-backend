@@ -231,7 +231,7 @@ export const authRoute = new Hono()
                 secure: true,
                 maxAge: 7 * 24 * 60 * 60,
             });
-            return c.json({ message: 'Inicio de sesión realizado con éxito', user }, 200);
+            return c.json({ message: 'Inicio de sesión realizado con éxito', user, token }, 200);
         } else {
             // Register new user
             const passwordHash = await bcrypt.hash(password, 10);
