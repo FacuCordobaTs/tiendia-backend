@@ -171,7 +171,7 @@ export const authRoute = new Hono()
             maxAge: 7 * 24 * 60 * 60,
         });
 
-        return c.json({ message: 'Usuario registrado correctamente', newUser }, 200);
+        return c.json({ message: 'Usuario registrado correctamente', newUser, token }, 200);
     } catch (error: any) {
         return c.json({ message: 'Error al registrar el usuario'}, 400);
     }
@@ -204,7 +204,7 @@ export const authRoute = new Hono()
             maxAge: 7 * 24 * 60 * 60,
         });
 
-        return c.json({ message: 'Inicio de sesión realizado con éxito', user }, 200);
+        return c.json({ message: 'Inicio de sesión realizado con éxito', user, token }, 200);
     } catch (error) {
         return c.json({ error: 'Login failed' }, 500);
     }
@@ -250,7 +250,7 @@ export const authRoute = new Hono()
                 secure: true,
                 maxAge: 7 * 24 * 60 * 60,
             });
-            return c.json({ message: 'Usuario registrado correctamente', user: newUser }, 200);
+            return c.json({ message: 'Usuario registrado correctamente', user: newUser, token}, 200);
         }
     } catch (error: any) {
         return c.json({ message: 'Error en login o registro'}, 400);
