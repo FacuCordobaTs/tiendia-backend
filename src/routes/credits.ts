@@ -82,11 +82,13 @@ creditsRouter
         });
     });
 
-    if ((decoded as JwtPayload).email !== 'review2025@tiendia.app') {
+
+    const currentUser = await db.select({ email: users.email, credits: users.credits }).from(users).where(eq(users.id, (decoded as JwtPayload).id)).limit(1);
+
+    if (currentUser[0].email !== 'review2025@tiendia.app') {
         return c.json({ error: 'Unauthorized' }, 401);
     }
 
-    const currentUser = await db.select({ credits: users.credits }).from(users).where(eq(users.id, (decoded as JwtPayload).id)).limit(1);
 
     const currentCredits = currentUser[0].credits;
 
