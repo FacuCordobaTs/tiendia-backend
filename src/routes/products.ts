@@ -751,6 +751,7 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
 
   try {
     const nameResult = await requestQueue.enqueue(nameWorkerPayload, workerUrl);
+    console.log("Respuesta del worker (generando nombre):", nameResult);
     if (nameResult.generatedName) {
       productName = nameResult.generatedName;
       console.log(`Nombre generado por worker: ${productName}`);
