@@ -1995,6 +1995,158 @@ productsRoute.post("/universal-image/:id", authMiddleware, zValidator("json", un
   }
 });
 
+productsRoute.post("/remove-background-image/:id", authMiddleware, zValidator("json", personalizeSchema), async (c) => {
+  const id = Number(c.req.param("id"));
+  const db = drizzle(pool);
+  const workerUrl = "https://personalized-worker.facucordoba200.workers.dev/remove-background-image";
+  const requestQueue = GeminiRequestQueue.getInstance();
+  let token = getCookie(c, 'token');
+  if (!token) {
+    // Buscar en el header Authorization
+    const authHeader = c.req.header('Authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.replace('Bearer ', '');
+    }
+  }
+  if (!token) return c.json({ error: 'Unauthorized' }, 401);
+
+  const decoded = await new Promise((resolve, reject) => {
+    jwt.verify(token, process.env.TOKEN_SECRET || 'my-secret', (error, decoded) => {
+      if (error) reject(error);
+      resolve(decoded);
+    });
+  });
+
+  const userId = (decoded as JwtPayload).id;
+
+  const credits = await db.select({
+    credits: users.credits,
+  })
+  .from(users)
+  .where(eq(users.id, userId));
+
+  if (!credits || !credits[0] || !credits[0].credits || credits[0].credits < 50) {
+    return c.json({ message: "Creditos no suficientes" }, { status: 400 });
+  }
+
+  if (isNaN(id)) {
+    return c.json({ error: "ID de producto inválido" }, { status: 400 });
+  }
+
+  try {
+    const productResult = await db
+      .select({
+        imageURL: products.imageURL,
+      })
+      .from(products)
+      .where(eq(products.id, id))
+      .limit(1);
+
+    if (!productResult || productResult.length === 0) {
+      return c.json({ message: "Producto no encontrado" }, { status: 404 });
+    }
+    const product = productResult[0];
+
+    if (!product.imageURL) {
+      return c.json(
+        { message: "El producto no tiene una imagen para quitar fondo." },
+        { status: 400 }
+      );
+    }
+
+    const originalProductImageUrl = product.imageURL;
+    const originalImageName = product.imageURL.split("/").pop();
+    if (!originalImageName) {
+      console.error("No se pudo extraer el nombre de archivo de:", product.imageURL);
+      return c.json({ message: "Error al procesar la URL de la imagen original." }, { status: 500 });
+    }
+    
+    let originalImageBase64: string;
+    let originalMimeType: string;
+
+    try {
+      console.log(`Descargando imagen original desde R2: ${originalProductImageUrl}`);
+      const response = await fetch(originalProductImageUrl);
+      if (!response.ok) {
+        throw new Error(`Error HTTP ${response.status} al descargar imagen de R2`);
+      }
+      const contentTypeHeader = response.headers.get("content-type");
+
+      if (contentTypeHeader && ALLOWED_MIME_TYPES.includes(contentTypeHeader)) {
+        originalMimeType = contentTypeHeader;
+      } else {
+        const urlPath = new URL(originalProductImageUrl).pathname;
+        const extension = urlPath.split('.').pop()?.toLowerCase();
+        if (extension === "jpg" || extension === "jpeg") originalMimeType = "image/jpeg";
+        else if (extension === "png") originalMimeType = "image/png";
+        else if (extension === "webp") originalMimeType = "image/webp";
+        else { throw new Error("Tipo MIME desconocido o no permitido para la imagen original."); }
+        console.warn(`Usando MimeType ${originalMimeType} basado en extensión para ${originalProductImageUrl}`);
+      }
+
+      const imageBuffer = await response.arrayBuffer();
+      originalImageBase64 = Buffer.from(imageBuffer).toString("base64");
+      console.log(`Imagen original descargada de R2 y convertida a Base64`);
+
+    } catch (fetchError: any) {
+      console.error(`Error al obtener/procesar la imagen original desde R2 (${originalProductImageUrl}):`, fetchError);
+      return c.json({ message: "Error crítico al acceder a la imagen original del producto." }, { status: 500 });
+    }
+
+    const personalizationParams = c.req.valid("json");
+    const workerPayload = {
+      imageBase64: originalImageBase64,
+      mimeType: originalMimeType,
+      ...personalizationParams
+    };
+    
+    await db.insert(imageGenerations).values({
+      userId: userId,
+      productId: id,
+      createdAt: new Date(),
+    });
+
+    console.log(`Enviando solicitud al worker para quitar fondo del producto ID: ${id}`);
+    const workerResponse = await requestQueue.enqueue(workerPayload, workerUrl);
+    console.log(`Respuesta del worker recibida correctamente`);
+
+    const imagePart = workerResponse.geminiData?.candidates?.[0]?.content?.parts?.find((part: { inlineData: any; }) => part.inlineData);
+    if (imagePart?.inlineData) {
+      const generatedImageData = imagePart.inlineData.data;
+      const mimeType = imagePart.inlineData.mimeType || "image/png";
+      const removeBackgroundImageUrl = await saveImage(`data:${mimeType};base64,${generatedImageData}`);
+      console.log("Imagen de fondo guardada en:", removeBackgroundImageUrl);
+
+      const result = await db.insert(images).values({
+        url: removeBackgroundImageUrl,
+        productId: id,
+        createdAt: new Date(),
+      }).$returningId();
+      console.log(`Registro insertado en tabla 'images' para producto ${id}, URL: ${removeBackgroundImageUrl}`);
+
+      if (credits[0] && credits[0].credits) { 
+        await db.update(users).set({
+          credits: credits[0].credits - 50,
+        }).where(eq(users.id, userId));
+      }
+
+      return c.json({
+        message: "Imagen de fondo generada correctamente.",
+        removeBackgroundImageUrl: removeBackgroundImageUrl,
+        imageId: result[0].id
+      }, { status: 200 });
+    } else {
+      console.warn("No se encontró inlineData en la respuesta del worker:", workerResponse);
+      return c.json({ message: "El worker no devolvió una imagen generada." }, { status: 500 });
+    }
+
+  } catch (error: any) {
+    console.error("Error en la ruta /girl-kid-image:", error);
+    const errorMessage = error.message || "Error interno del servidor al generar la imagen de niña.";
+    return c.json({ message: errorMessage }, { status: 500 });
+  }
+});
+
 
 productsRoute .post("/update-pricing", authMiddleware, zValidator("json", updateProductPricingSchema), async (c) => {
   const { products: productsToUpdate } = c.req.valid("json"); 
