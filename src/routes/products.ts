@@ -1854,6 +1854,148 @@ productsRoute.post("/girl-kid-image/:id", authMiddleware, zValidator("json", per
   }
 });
 
+const universalSchema = z.object({
+  gender: z.enum(['male', 'female']).optional().default('female'),
+  ageGroup: z.enum(['baby', 'child', 'adult', 'senior']).optional().default('adult'),
+  skinTone: z.enum(['light', 'medium', 'dark', 'olive']).optional(),
+  bodyType: z.enum(['slim', 'athletic', 'curvy']).optional(),
+  view: z.enum(['front', 'back']).optional().default('front'),
+  isOutfit: z.boolean().optional().default(false)
+});
+
+productsRoute.post("/universal-image/:id", authMiddleware, zValidator("json", universalSchema), async (c) => {
+  const id = Number(c.req.param("id"));
+  const db = drizzle(pool);
+  // URL del worker apuntando al nuevo endpoint universal
+  const workerUrl = "https://personalized-worker.facucordoba200.workers.dev/universal-image";
+  const requestQueue = GeminiRequestQueue.getInstance();
+  
+  // 1. Autenticación
+  let token = getCookie(c, 'token');
+  if (!token) {
+    const authHeader = c.req.header('Authorization');
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+        token = authHeader.replace('Bearer ', '');
+    }
+  }
+  if (!token) return c.json({ error: 'Unauthorized' }, 401);
+
+  const decoded = await new Promise((resolve, reject) => {
+    jwt.verify(token, process.env.TOKEN_SECRET || 'my-secret', (error, decoded) => {
+      if (error) reject(error);
+      resolve(decoded);
+    });
+  });
+
+  const userId = (decoded as JwtPayload).id;
+
+  // 2. Verificación de Créditos
+  const credits = await db.select({ credits: users.credits }).from(users).where(eq(users.id, userId));
+
+  if (!credits || !credits[0] || !credits[0].credits || credits[0].credits < 50) {
+    return c.json({ message: "Creditos no suficientes" }, { status: 400 });
+  }
+
+  if (isNaN(id)) {
+    return c.json({ error: "ID de producto inválido" }, { status: 400 });
+  }
+
+  try {
+    // 3. Obtener producto e imagen original
+    const productResult = await db.select({ imageURL: products.imageURL }).from(products).where(eq(products.id, id)).limit(1);
+
+    if (!productResult || productResult.length === 0) {
+      return c.json({ message: "Producto no encontrado" }, { status: 404 });
+    }
+    const product = productResult[0];
+
+    if (!product.imageURL) {
+      return c.json({ message: "El producto no tiene una imagen base." }, { status: 400 });
+    }
+
+    // 4. Descargar imagen desde R2
+    let originalImageBase64: string;
+    let originalMimeType: string;
+
+    try {
+      console.log(`Descargando imagen original desde R2: ${product.imageURL}`);
+      const response = await fetch(product.imageURL);
+      if (!response.ok) throw new Error(`Error HTTP ${response.status}`);
+      
+      const contentTypeHeader = response.headers.get("content-type");
+      if (contentTypeHeader && ALLOWED_MIME_TYPES.includes(contentTypeHeader)) {
+        originalMimeType = contentTypeHeader;
+      } else {
+        // Fallback por extensión
+        const extension = new URL(product.imageURL).pathname.split('.').pop()?.toLowerCase();
+        originalMimeType = extension === "png" ? "image/png" : (extension === "webp" ? "image/webp" : "image/jpeg");
+      }
+
+      const imageBuffer = await response.arrayBuffer();
+      originalImageBase64 = Buffer.from(imageBuffer).toString("base64");
+    } catch (fetchError: any) {
+      console.error("Error descargando imagen de R2:", fetchError);
+      return c.json({ message: "Error crítico al acceder a la imagen original." }, { status: 500 });
+    }
+
+    // 5. Preparar Payload para el Worker
+    const params = c.req.valid("json");
+    
+    const workerPayload = {
+      imageBase64: originalImageBase64,
+      mimeType: originalMimeType,
+      ...params // Pasa gender, ageGroup, skinTone, bodyType, view, isOutfit
+    };
+
+    // Registrar intento de generación
+    await db.insert(imageGenerations).values({
+      userId: userId,
+      productId: id,
+      createdAt: new Date(),
+    });
+
+    // 6. Llamar al Worker
+    console.log(`Enviando solicitud universal al worker para producto ID: ${id}`);
+    const workerResponse = await requestQueue.enqueue(workerPayload, workerUrl);
+    
+    // 7. Procesar respuesta
+    const imagePart = workerResponse.geminiData?.candidates?.[0]?.content?.parts?.find((part: { inlineData: any; }) => part.inlineData);
+    
+    if (imagePart?.inlineData) {
+      const generatedImageData = imagePart.inlineData.data;
+      const genMimeType = imagePart.inlineData.mimeType || "image/png";
+      
+      // 8. Guardar nueva imagen en R2
+      const newImageUrl = await saveImage(`data:${genMimeType};base64,${generatedImageData}`);
+      console.log("Imagen universal guardada en:", newImageUrl);
+
+      const result = await db.insert(images).values({
+        url: newImageUrl,
+        productId: id,
+        createdAt: new Date(),
+      }).$returningId();
+
+      // 9. Descontar créditos
+      await db.update(users).set({ credits: credits[0].credits - 50 }).where(eq(users.id, userId));
+
+      return c.json({
+        message: "Imagen generada correctamente.",
+        imageUrl: newImageUrl,
+        imageId: result[0].id
+      }, { status: 200 });
+
+    } else {
+      console.warn("Worker no devolvió inlineData:", workerResponse);
+      return c.json({ message: "El worker no generó la imagen." }, { status: 500 });
+    }
+
+  } catch (error: any) {
+    console.error("Error en /universal-image:", error);
+    return c.json({ message: error.message || "Error interno del servidor." }, { status: 500 });
+  }
+});
+
+
 productsRoute .post("/update-pricing", authMiddleware, zValidator("json", updateProductPricingSchema), async (c) => {
   const { products: productsToUpdate } = c.req.valid("json"); 
   const db = drizzle(pool);
