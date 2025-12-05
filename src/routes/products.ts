@@ -833,6 +833,25 @@ productsRoute.post("/generate-product-and-image",authMiddleware, zValidator("jso
   );
 })
 
+const nameSchema = z.object({
+  imageBase64: z.string(),
+  mimeType: z.string(),
+});
+
+productsRoute.post("/generate-name", authMiddleware, zValidator("json", nameSchema), async (c) => {
+  const { imageBase64, mimeType } = c.req.valid("json");
+  const db = drizzle(pool);
+  const workerUrl = "https://personalized-worker.facucordoba200.workers.dev/generate-name";
+  const requestQueue = GeminiRequestQueue.getInstance();
+  const workerPayload = {
+    task: 'generate_name',
+    imageBase64: imageBase64,
+    mimeType: mimeType,
+  };
+  const nameResult = await requestQueue.enqueue(workerPayload, workerUrl);
+  return c.json({ name: nameResult.generatedName }, 200);
+});
+
 productsRoute.post("/upload-images", authMiddleware, async (c) => {
   const db = drizzle(pool);
   let token = getCookie(c, 'token');
