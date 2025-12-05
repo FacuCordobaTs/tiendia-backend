@@ -839,17 +839,19 @@ const nameSchema = z.object({
 });
 
 productsRoute.post("/generate-name", authMiddleware, zValidator("json", nameSchema), async (c) => {
-  const { imageBase64, mimeType } = c.req.valid("json");
-  const db = drizzle(pool);
+  try {
+    const { imageBase64, mimeType } = c.req.valid("json");
   const workerUrl = "https://personalized-worker.facucordoba200.workers.dev/generate-name";
   const requestQueue = GeminiRequestQueue.getInstance();
   const workerPayload = {
-    task: 'generate_name',
     imageBase64: imageBase64,
     mimeType: mimeType,
   };
   const nameResult = await requestQueue.enqueue(workerPayload, workerUrl);
   return c.json({ name: nameResult.generatedName }, 200);
+  } catch (error) {
+    return c.json({ message: "Error al generar el nombre" }, 500);
+  }
 });
 
 productsRoute.post("/upload-images", authMiddleware, async (c) => {
