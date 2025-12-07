@@ -901,7 +901,7 @@ productsRoute.post("/upload-images", authMiddleware, async (c) => {
       return c.json({ message: "No se proporcionaron imágenes" }, 400);
     }
 
-    const workerUrl = "https://gemini-worker.facucordoba200.workers.dev";
+    const workerUrl = "https://personalized-worker.facucordoba200.workers.dev/generate-name";
     const requestQueue = GeminiRequestQueue.getInstance();
     const savedProducts = [];
 
@@ -915,7 +915,6 @@ productsRoute.post("/upload-images", authMiddleware, async (c) => {
       // Generar nombre del producto para esta imagen
       console.log("Llamando al worker para generar nombre...");
       const nameWorkerPayload = {
-        task: 'generate_name',
         imageBase64: base64,
         mimeType: mimeType,
       };
@@ -923,8 +922,8 @@ productsRoute.post("/upload-images", authMiddleware, async (c) => {
       try {
         const nameResult = await requestQueue.enqueue(nameWorkerPayload, workerUrl);
         console.log("Respuesta del worker (generando nombre):", nameResult);
-        if (nameResult.generatedName) {
-          productName = nameResult.generatedName;
+        if (nameResult.geminiData.candidates[0].content.parts[0].text) {
+          productName = nameResult.geminiData.candidates[0].content.parts[0].text;
           console.log(`Nombre generado por worker: ${productName}`);
         } else {
           console.warn("Worker no devolvió nombre generado:", nameResult);
