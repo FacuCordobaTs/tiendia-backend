@@ -848,6 +848,7 @@ productsRoute.post("/generate-name", authMiddleware, zValidator("json", nameSche
     mimeType: mimeType,
   };
   const nameResult = await requestQueue.enqueue(workerPayload, workerUrl);
+  console.log(nameResult);
   return c.json({ name: nameResult.generatedName }, 200);
   } catch (error) {
     return c.json({ message: "Error al generar el nombre" }, 500);
