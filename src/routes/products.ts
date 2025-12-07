@@ -849,7 +849,7 @@ productsRoute.post("/generate-name", authMiddleware, zValidator("json", nameSche
   };
   const nameResult = await requestQueue.enqueue(workerPayload, workerUrl);
   console.log(nameResult);
-  return c.json({ name: nameResult }, 200);
+  return c.json({ name: nameResult.geminiData.candidates[0].content.parts[0].text }, 200);
   } catch (error) {
     return c.json({ message: "Error al generar el nombre" }, 500);
   }
