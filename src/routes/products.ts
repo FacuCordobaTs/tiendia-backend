@@ -1876,12 +1876,12 @@ productsRoute.post("/girl-kid-image/:id", authMiddleware, zValidator("json", per
 });
 
 const universalSchema = z.object({
-  gender: z.enum(['male', 'female']).optional().default('female'),
-  ageGroup: z.enum(['baby', 'child', 'adult', 'senior']).optional().default('adult'),
+  gender: z.enum(['male', 'female']).optional(),
+  ageGroup: z.enum(['baby', 'child', 'adult', 'senior']).optional(),
   skinTone: z.enum(['light', 'medium', 'dark', 'olive']).optional(),
   bodyType: z.enum(['slim', 'athletic', 'curvy']).optional(),
-  view: z.enum(['front', 'back']).optional().default('front'),
-  isOutfit: z.boolean().optional().default(false)
+  view: z.enum(['front', 'back']).optional(),
+  isOutfit: z.boolean().optional()
 });
 
 productsRoute.post("/universal-image/:id", authMiddleware, zValidator("json", universalSchema), async (c) => {
